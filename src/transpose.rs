@@ -19,20 +19,26 @@ impl TransposeData for RowData {
 		if num_cols == 0 {
 			return Vec::new();
 		}
-		let num_rows = self.iter().find_map(|col| match col {
-			Some(DbValue::Array(arr)) => Some(arr.len()),
-			_ => None,
-		});
 
-		let num_rows = match num_rows {
-			Some(len) => len,
+		// 1. Pre-flight Matrix Invariant Check:
+		let lengths: Vec<usize> = self.iter()
+			.filter_map(|col| match col {
+				Some(DbValue::Array(arr)) => Some(arr.len()),
+				_ => None,
+			})
+			.collect();
+
+		let num_rows = match lengths.first() {
 			None => return vec![Row::new(column_info, self)],
+			Some(&len) if lengths.iter().all(|&l| l == len) => len,
+			Some(_) => panic!("Database returned ragged columnar data with mismatched row counts!"),
 		};
 
 		if num_rows == 0 {
 			return Vec::new();
 		}
-		// Unpack columnar DbValue::Array into column vectors:
+
+		// 2. Unpack columns:
 		let mut columns: Vec<Vec<Option<DbValue>>> = Vec::with_capacity(num_cols);
 		for col_opt in self {
 			match col_opt {
@@ -41,15 +47,18 @@ impl TransposeData for RowData {
 				None => columns.push(vec![None; num_rows]),
 			}
 		}
-		// Build N horizontal Row structs:
+
+		// 3. Fast Pointer Lockstep Transposition:
+		let mut iters: Vec<_> = columns.iter_mut().map(|c| c.iter_mut()).collect();
 		let mut rows = Vec::with_capacity(num_rows);
-		for row_idx in 0..num_rows {
+		for _ in 0..num_rows {
 			let mut row_values = Vec::with_capacity(num_cols);
-			for col in columns.iter_mut() {
-				row_values.push(col[row_idx].take());
+			for it in iters.iter_mut() {
+				row_values.push(it.next().and_then(|opt| opt.take()));
 			}
 			rows.push(Row::new(column_info, row_values));
 		}
+
 		rows
 	}
 }
