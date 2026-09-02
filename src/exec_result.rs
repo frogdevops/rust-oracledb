@@ -36,15 +36,17 @@ use crate::row::{Row, RowData};
 use crate::transpose::TransposeData;
 
 /// Represents the result returned by the database when calling
-/// [Connection::execute()](`crate::Connection::execute()`),
-/// [Connection::execute_named()](`crate::Connection::execute_named()`), or
-/// [Connection::execute_batch()](`crate::Connection::execute_batch()`).
+/// [Connection::execute()](`crate::Connection::execute()`) or
+/// [Connection::execute_named()](`crate::Connection::execute_named()`).
 pub struct ExecResult {
     column_info: Arc<Vec<Metadata>>,
     returned_data: Option<Vec<RowData>>,
     rows_affected: u64,
 }
 
+/// Represents the result returned by the database when calling
+/// [Connection::execute_batch()](`crate::Connection::execute_batch()`) or
+/// [Statement::execute_batch()](`crate::Statement::execute_batch()`).
 pub struct ExecBatchResult {
 	column_info: Arc<Vec<Metadata>>,
 	returned_data: Option<Vec<RowData>>,
@@ -97,7 +99,8 @@ impl ExecBatchResult {
 	}
 
 	/// Returns data returned by the database as OUT variables (PL/SQL or
-	/// RETURNING statements) for each execution in the batch.
+	/// RETURNING statements) for each execution in the batch. This transfers
+	/// ownership of the returned data to the caller.
 	pub fn returned_data(&mut self) -> Vec<Vec<Row>> {
 		if let Some(returned_data) = self.returned_data.take() {
 			returned_data.transpose(&self.column_info)
