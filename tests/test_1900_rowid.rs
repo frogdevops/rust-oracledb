@@ -115,10 +115,15 @@ fn test_1903(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         &[("value", &"rowid value"), ("out_rowid", &" ".repeat(18))],
     )?;
     assert_eq!(result.rows_affected(), 1);
-    let returned = result.returned_data();
-    assert_eq!(returned.len(), 1);
-    let rowids: Vec<String> = returned[0].get_array(0)?;
-    assert_eq!(rowids.len(), 1);
-    assert!(!rowids[0].is_empty());
+	let returned = result.returned_data();
+	assert_eq!(returned.len(), 1);
+
+	// 1. Test scalar lookup by name:
+	let rowid: &str = returned[0].get("out_rowid")?;
+	assert!(!rowid.is_empty());
+
+	// 2. Test scalar lookup by numeric index (positional):
+	let rowid_by_pos: &str = returned[0].get(0)?;
+	assert_eq!(rowid, rowid_by_pos);
     Ok(())
 }
