@@ -32,15 +32,15 @@ use std::sync::Arc;
 
 use crate::metadata::Metadata;
 use crate::response::Response;
-use crate::row::{Row, RowData};
-use crate::transpose::TransposeData;
+use crate::row::Row;
+use crate::transpose::{RawColumnarData, TransposeData};
 
 /// Represents the result returned by the database when calling
 /// [Connection::execute()](`crate::Connection::execute()`) or
 /// [Connection::execute_named()](`crate::Connection::execute_named()`).
 pub struct ExecResult {
     column_info: Arc<Vec<Metadata>>,
-    returned_data: Option<Vec<RowData>>,
+    returned_data: Option<RawColumnarData>,
     rows_affected: u64,
 }
 
@@ -49,7 +49,7 @@ pub struct ExecResult {
 /// [Statement::execute_batch()](`crate::Statement::execute_batch()`).
 pub struct ExecBatchResult {
 	column_info: Arc<Vec<Metadata>>,
-	returned_data: Option<Vec<RowData>>,
+	returned_data: Option<Vec<RawColumnarData>>,
 	rows_affected: u64,
 }
 
@@ -60,7 +60,10 @@ impl ExecResult {
     ) -> ExecResult {
         ExecResult {
             column_info: Arc::new(column_info.to_vec()),
-            returned_data: resp.take_rows(),
+            returned_data: resp
+                .take_rows()
+                .and_then(|mut v| v.pop())
+                .map(RawColumnarData::new),
             rows_affected: resp.get_rowcount(),
         }
     }
@@ -71,17 +74,13 @@ impl ExecResult {
     }
 
     /// Returns data returned by the database as OUT variables (PL/SQL or
-    /// RETURNING statements. This transfers ownership of the returned data to
+    /// RETURNING statements). This transfers ownership of the returned data to
     /// the caller.
     pub fn returned_data(&mut self) -> Vec<Row> {
-        if let Some(mut returned_data) = self.returned_data.take() {
-           if let Some(row_data) = returned_data.pop() {
-	           row_data.transpose(&self.column_info)
-           } else {
-	           Vec::new()
-           }
+        if let Some(raw_data) = self.returned_data.take() {
+            raw_data.transpose(&self.column_info)
         } else {
-            Vec::<Row>::new()
+            Vec::new()
         }
     }
 }
@@ -90,10 +89,14 @@ impl ExecBatchResult {
 	pub(crate) fn new(column_info: &[Metadata], resp: &mut Response) -> ExecBatchResult {
 		ExecBatchResult {
 			column_info: Arc::new(column_info.to_vec()),
-			returned_data: resp.take_rows(),
+			returned_data: resp
+				.take_rows()
+				.map(|rows| rows.into_iter().map(RawColumnarData::new).collect()),
 			rows_affected: resp.get_rowcount(),
 		}
 	}
+
+	/// Returns the total number of rows affected by the execution of the batch.
 	pub fn rows_affected(&self) -> u64 {
 		self.rows_affected
 	}
@@ -102,10 +105,10 @@ impl ExecBatchResult {
 	/// RETURNING statements) for each execution in the batch. This transfers
 	/// ownership of the returned data to the caller.
 	pub fn returned_data(&mut self) -> Vec<Vec<Row>> {
-		if let Some(returned_data) = self.returned_data.take() {
-			returned_data.transpose(&self.column_info)
+		if let Some(batch_data) = self.returned_data.take() {
+			batch_data.transpose(&self.column_info)
 		} else {
-			Vec::<Vec<Row>>::new()
+			Vec::new()
 		}
 	}
 }
