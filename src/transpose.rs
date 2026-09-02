@@ -3,25 +3,37 @@ use crate::db_value::DbValue;
 use crate::{Metadata, Row};
 use crate::row::RowData;
 
+/// Opaque wrapper ensuring a statement's raw columnar wire container
+/// MUST be transposed before it can be converted into `Row` structs.
+pub(crate) struct RawColumnarData(RowData);
+
+impl RawColumnarData {
+	/// Creates a new opaque wrapper around a statement's raw wire container.
+	pub(crate) fn new(data: RowData) -> Self {
+		Self(data)
+	}
+}
+
 /// Trait for converting raw database response data into structured, row-oriented formats.
 pub(crate) trait TransposeData {
 	type Output;
 	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Self::Output;
 }
 
-// For Singleton (RowData -> Vec<Row>)
-
-impl TransposeData for RowData {
+// For Singleton (RawColumnarData -> Vec<Row>)
+impl TransposeData for RawColumnarData {
 	type Output = Vec<Row>;
 
 	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Vec<Row> {
-		let num_cols = self.len();
+		let container_row = self.0;
+		let num_cols = container_row.len();
 		if num_cols == 0 {
 			return Vec::new();
 		}
 
 		// 1. Pre-flight Matrix Invariant Check:
-		let lengths: Vec<usize> = self.iter()
+		let lengths: Vec<usize> = container_row
+			.iter()
 			.filter_map(|col| match col {
 				Some(DbValue::Array(arr)) => Some(arr.len()),
 				_ => None,
@@ -29,7 +41,7 @@ impl TransposeData for RowData {
 			.collect();
 
 		let num_rows = match lengths.first() {
-			None => return vec![Row::new(column_info, self)],
+			None => return vec![Row::new(column_info, container_row)],
 			Some(&len) if lengths.iter().all(|&l| l == len) => len,
 			Some(_) => panic!("Database returned ragged columnar data with mismatched row counts!"),
 		};
@@ -40,7 +52,7 @@ impl TransposeData for RowData {
 
 		// 2. Unpack columns:
 		let mut columns: Vec<Vec<Option<DbValue>>> = Vec::with_capacity(num_cols);
-		for col_opt in self {
+		for col_opt in container_row {
 			match col_opt {
 				Some(DbValue::Array(arr)) => columns.push(arr),
 				Some(scalar) => columns.push(vec![Some(scalar); num_rows]),
@@ -63,13 +75,13 @@ impl TransposeData for RowData {
 	}
 }
 
-// For Batch:
-impl TransposeData for Vec<RowData> {
+// For Batch (Vec<RawColumnarData> -> Vec<Vec<Row>>)
+impl TransposeData for Vec<RawColumnarData> {
 	type Output = Vec<Vec<Row>>;
 
 	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Vec<Vec<Row>> {
 		self.into_iter()
-			.map(|row_data| row_data.transpose(column_info))
+			.map(|raw_data| raw_data.transpose(column_info))
 			.collect()
 	}
 }
