@@ -36,7 +36,7 @@ use crate::client::ClientRef;
 use crate::cursor::Cursor;
 use crate::db_value::ToDbValue;
 use crate::error::Error;
-use crate::exec_result::ExecResult;
+use crate::exec_result::{ExecBatchResult, ExecResult};
 use crate::row::Row;
 use crate::statement::StatementHolder;
 use crate::statement::StatementOptions;
@@ -99,10 +99,10 @@ impl<'sql> Statement<'sql> {
     pub fn execute_batch(
         &self,
         params: BindParameters,
-    ) -> Result<ExecResult, Error> {
+    ) -> Result<ExecBatchResult, Error> {
         let mut holder = self.holder()?;
         let mut response = holder.execute_batch(params)?;
-        Ok(ExecResult::new(holder.out_metadata(), &mut response))
+        Ok(ExecBatchResult::new(holder.out_metadata(), &mut response))
     }
 
     /// Executes the statement with the given named parameters and returns an
