@@ -115,7 +115,7 @@ fn test_1903(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         &[("value", &"rowid value"), ("out_rowid", &" ".repeat(18))],
     )?;
     assert_eq!(result.rows_affected(), 1);
-	let returned = result.returned_data();
+	let returned = result.returned_data()?;
 	assert_eq!(returned.len(), 1);
 
 	// 1. Test scalar lookup by name:

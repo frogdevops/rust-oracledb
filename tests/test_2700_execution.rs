@@ -80,15 +80,15 @@ fn test_2701(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         "begin :out_value := :input_value * 2; end;",
         &[("input_value", &21), ("out_value", &0)],
     )?;
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
     assert_eq!(returned_data.len(), 1);
     let out_value: i32 = returned_data[0].get(0)?;
     assert_eq!(out_value, 42);
-    assert!(result.returned_data().is_empty());
+    assert!(result.returned_data()?.is_empty());
 
     let mut result =
         conn.execute("begin :1 := :1 || :2; end;", &[&"value", &"-updated"])?;
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
     let value: String = returned_data[0].get(0)?;
     assert_eq!(value, "value-updated");
     Ok(())
@@ -115,7 +115,7 @@ fn test_2702(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
     conn.commit()?;
     assert_eq!(result.rows_affected(), 1);
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
     assert_eq!(returned_data.len(), 1);
     let value: &str = returned_data[0].get("out_value")?;
     assert_eq!(value, "returned value");
@@ -186,7 +186,7 @@ fn test_2705(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         "begin :out_value := cast(null as number); end;",
         &[("out_value", &0)],
     )?;
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
     assert_eq!(returned_data.len(), 1);
     let out_value: Option<i32> = returned_data[0].get(0)?;
     assert!(out_value.is_none());
@@ -418,7 +418,8 @@ fn test_2715(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
     assert_eq!(result.rows_affected(), 2);
 
-    let returned_data = result.returned_data();assert_eq!(returned_data.len(), 2);
+    let returned_data = result.returned_data()?;
+    assert_eq!(returned_data.len(), 2);
 	// positional access
 	let fst_idx = returned_data[0].get::<usize>(0)?;
 	let fst_val = returned_data[0].get::<&str>(1)?;
@@ -467,7 +468,7 @@ fn test_2716(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
     assert_eq!(result.rows_affected(), 1);
 
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
 
 	let val_pos: &str = returned_data[0].get(0)?;
 	let val_named: &str = returned_data[0].get("out_value")?;
@@ -495,7 +496,7 @@ fn test_2717(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
     assert_eq!(result.rows_affected(), 0);
 
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
     assert!(returned_data.is_empty());
     Ok(())
 }
@@ -578,7 +579,7 @@ fn test_2719(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
 
     // SHAPE EXPECTATION 1: returned_data.len() must be 3 (one Row per affected record)
-    let returned_data = result.returned_data();
+    let returned_data = result.returned_data()?;
     assert_eq!(returned_data.len(), 3);
 
     // SHAPE EXPECTATION 2: Each Row must hold SCALAR values accessible via row.get()
@@ -632,7 +633,7 @@ fn test_2720(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
 
     // SHAPE EXPECTATION 1: returned_data produces Vec<Vec<Row>> of length 3 (1 set per batch item)
-    let batch_data: Vec<Vec<oracledb::Row>> = batch_result.returned_data();
+    let batch_data: Vec<Vec<oracledb::Row>> = batch_result.returned_data()?;
     assert_eq!(batch_data.len(), 3);
 
     // Iteration 0 (Dept 10) affected 2 rows (Alice, Bob)
