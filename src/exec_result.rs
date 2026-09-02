@@ -32,7 +32,8 @@ use std::sync::Arc;
 
 use crate::metadata::Metadata;
 use crate::response::Response;
-use crate::row::{DbRow, Row};
+use crate::row::{Row, RowData};
+use crate::transpose::TransposeData;
 
 /// Represents the result returned by the database when calling
 /// [Connection::execute()](`crate::Connection::execute()`),
@@ -40,12 +41,14 @@ use crate::row::{DbRow, Row};
 /// [Connection::execute_batch()](`crate::Connection::execute_batch()`).
 pub struct ExecResult {
     column_info: Arc<Vec<Metadata>>,
-    returned_data: Option<Vec<DbRow>>,
+    returned_data: Option<Vec<RowData>>,
     rows_affected: u64,
 }
 
 pub struct ExecBatchResult {
-	
+	column_info: Arc<Vec<Metadata>>,
+	returned_data: Option<Vec<RowData>>,
+	rows_affected: u64,
 }
 
 impl ExecResult {
@@ -69,14 +72,37 @@ impl ExecResult {
     /// RETURNING statements. This transfers ownership of the returned data to
     /// the caller.
     pub fn returned_data(&mut self) -> Vec<Row> {
-        if let Some(returned_data) = self.returned_data.take() {
-            let mut rows = Vec::<Row>::with_capacity(returned_data.len());
-            for column_values in returned_data {
-                rows.push(Row::new(&self.column_info, column_values));
-            }
-            rows
+        if let Some(mut returned_data) = self.returned_data.take() {
+           if let Some(row_data) = returned_data.pop() {
+	           row_data.transpose(&self.column_info)
+           } else {
+	           Vec::new()
+           }
         } else {
             Vec::<Row>::new()
         }
     }
+}
+
+impl ExecBatchResult {
+	pub(crate) fn new(column_info: &[Metadata], resp: &mut Response) -> ExecBatchResult {
+		ExecBatchResult {
+			column_info: Arc::new(column_info.to_vec()),
+			returned_data: resp.take_rows(),
+			rows_affected: resp.get_rowcount(),
+		}
+	}
+	pub fn rows_affected(&self) -> u64 {
+		self.rows_affected
+	}
+
+	/// Returns data returned by the database as OUT variables (PL/SQL or
+	/// RETURNING statements) for each execution in the batch.
+	pub fn returned_data(&mut self) -> Vec<Vec<Row>> {
+		if let Some(returned_data) = self.returned_data.take() {
+			returned_data.transpose(&self.column_info)
+		} else {
+			Vec::<Vec<Row>>::new()
+		}
+	}
 }
