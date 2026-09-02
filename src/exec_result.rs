@@ -44,6 +44,10 @@ pub struct ExecResult {
     rows_affected: u64,
 }
 
+pub struct ExecBatchResult {
+	
+}
+
 impl ExecResult {
     pub(crate) fn new(
         column_info: &[Metadata],

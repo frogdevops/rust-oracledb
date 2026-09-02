@@ -117,8 +117,10 @@ fn test_2702(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(result.rows_affected(), 1);
     let returned_data = result.returned_data();
     assert_eq!(returned_data.len(), 1);
-    let values: Vec<String> = returned_data[0].get_array(0)?;
-    assert_eq!(values, vec!["returned value"]);
+    let value: &str = returned_data[0].get("out_value")?;
+    assert_eq!(value, "returned value");
+    let value_by_pos: &str = returned_data[0].get(0)?;
+    assert_eq!(value_by_pos, "returned value");
     Ok(())
 }
 
@@ -472,9 +474,7 @@ fn test_2717(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(result.rows_affected(), 0);
 
     let returned_data = result.returned_data();
-    assert_eq!(returned_data.len(), 1);
-    let values: Vec<String> = returned_data[0].get_array(0)?;
-    assert!(values.is_empty());
+    assert!(returned_data.is_empty());
     Ok(())
 }
 
@@ -524,3 +524,114 @@ fn test_2718(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(values, vec![1, 2, 3]);
     Ok(())
 }
+
+#[rstest]
+/// Tests scalar row transposition for singleton DML RETURNING in ExecResult::returned_data().
+fn test_2719(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2719",
+        "id number primary key, value varchar2(30)",
+    )?;
+
+    // 1. Insert 3 initial rows
+    for i in 1..=3 {
+        conn.execute(
+            "insert into test_2719 (id, value) values (:1, :2)",
+            &[&i, &format!("value_{}", i)],
+        )?;
+    }
+    conn.commit()?;
+
+    // 2. Multi-row update with RETURNING
+    let out_id = 0i64;
+    let out_value = " ".repeat(30);
+    let mut result = conn.execute_named(
+        "update test_2719 set value = 'updated' \
+         returning id, value into :out_id, :out_value",
+        &[
+            ("out_id", &out_id),
+            ("out_value", &out_value),
+        ],
+    )?;
+
+    // SHAPE EXPECTATION 1: returned_data.len() must be 3 (one Row per affected record)
+    let returned_data = result.returned_data();
+    assert_eq!(returned_data.len(), 3);
+
+    // SHAPE EXPECTATION 2: Each Row must hold SCALAR values accessible via row.get()
+    for (idx, row) in returned_data.iter().enumerate() {
+        let expected_id = (idx + 1) as i64;
+        assert_eq!(row.get::<i64>("out_id")?, expected_id);
+        assert_eq!(row.get::<&str>("out_value")?, "updated");
+        assert_eq!(row.get::<i64>(0)?, expected_id);
+        assert_eq!(row.get::<&str>(1)?, "updated");
+    }
+
+    Ok(())
+}
+
+#[rstest]
+/// Tests 2D row transposition for batch DML RETURNING in ExecBatchResult::returned_data().
+fn test_2720(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2720",
+        "dept_id number, emp_id number, name varchar2(30)",
+    )?;
+
+    // 1. Insert initial batch (5 rows across 3 departments)
+    let initial_data: &[&[&dyn oracledb::ToDbValue]] = &[
+        &[&10, &101, &"Alice"],
+        &[&10, &102, &"Bob"],
+        &[&20, &201, &"Charlie"],
+        &[&30, &301, &"Dave"],
+        &[&30, &302, &"Eve"],
+    ];
+    conn.execute_batch(
+        "insert into test_2720 (dept_id, emp_id, name) values (:1, :2, :3)",
+        oracledb::BindParameters::Slice(initial_data),
+    )?;
+    conn.commit()?;
+
+    // 2. Execute batch update with RETURNING on 3 departments (10, 20, 30)
+    let out_emp_id = 0i64;
+    let out_name = " ".repeat(30);
+    let batch_params: &[&[&dyn oracledb::ToDbValue]] = &[
+        &[&10, &out_emp_id, &out_name],
+        &[&20, &out_emp_id, &out_name],
+        &[&30, &out_emp_id, &out_name],
+    ];
+
+    let mut batch_result = conn.execute_batch(
+        "update test_2720 set name = name || '_upd' where dept_id = :1 \
+         returning emp_id, name into :2, :3",
+        oracledb::BindParameters::Slice(batch_params),
+    )?;
+
+    // SHAPE EXPECTATION 1: returned_data produces Vec<Vec<Row>> of length 3 (1 set per batch item)
+    let batch_data: Vec<Vec<oracledb::Row>> = batch_result.returned_data();
+    assert_eq!(batch_data.len(), 3);
+
+    // Iteration 0 (Dept 10) affected 2 rows (Alice, Bob)
+    assert_eq!(batch_data[0].len(), 2);
+    assert_eq!(batch_data[0][0].get::<i64>("emp_id")?, 101);
+    assert_eq!(batch_data[0][0].get::<&str>("name")?, "Alice_upd");
+    assert_eq!(batch_data[0][1].get::<i64>("emp_id")?, 102);
+    assert_eq!(batch_data[0][1].get::<&str>("name")?, "Bob_upd");
+
+    // Iteration 1 (Dept 20) affected 1 row (Charlie)
+    assert_eq!(batch_data[1].len(), 1);
+    assert_eq!(batch_data[1][0].get::<i64>("emp_id")?, 201);
+    assert_eq!(batch_data[1][0].get::<&str>("name")?, "Charlie_upd");
+
+    // Iteration 2 (Dept 30) affected 2 rows (Dave, Eve)
+    assert_eq!(batch_data[2].len(), 2);
+    assert_eq!(batch_data[2][0].get::<i64>("emp_id")?, 301);
+    assert_eq!(batch_data[2][0].get::<&str>("name")?, "Dave_upd");
+    assert_eq!(batch_data[2][1].get::<i64>("emp_id")?, 302);
+    assert_eq!(batch_data[2][1].get::<&str>("name")?, "Eve_upd");
+
+    Ok(())
+}
+
