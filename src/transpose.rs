@@ -19,9 +19,14 @@ impl TransposeData for RowData {
 		if num_cols == 0 {
 			return Vec::new();
 		}
-		let num_rows = match self.first() {
-			Some(Some(DbValue::Array(arr))) => arr.len(),
-			_ => return vec![Row::new(column_info, self)]
+		let num_rows = self.iter().find_map(|col| match col {
+			Some(DbValue::Array(arr)) => Some(arr.len()),
+			_ => None,
+		});
+
+		let num_rows = match num_rows {
+			Some(len) => len,
+			None => return vec![Row::new(column_info, self)],
 		};
 
 		if num_rows == 0 {
