@@ -49,3 +49,14 @@ impl TransposeData for RowData {
 	}
 }
 
+// For Batch:
+impl TransposeData for Vec<RowData> {
+	type Output = Vec<Vec<Row>>;
+
+	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Vec<Vec<Row>> {
+		self.into_iter()
+			.map(|row_data| row_data.transpose(column_info))
+			.collect()
+	}
+}
+
