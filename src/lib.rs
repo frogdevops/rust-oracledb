@@ -67,6 +67,7 @@ mod transport;
 mod utils;
 mod vector;
 mod write_buffer;
+mod transpose;
 
 // public structs
 pub use crate::config::Config;
