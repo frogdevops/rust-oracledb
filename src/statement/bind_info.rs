@@ -71,6 +71,7 @@ impl BindInfo {
             *binds_changed = true;
             let mut metadata =
                 Metadata::new_scalar(desired_type, desired_max_size);
+	        metadata.set_name(self.name.clone());
             if self.is_return_bind {
                 metadata.set_is_array(true);
             }

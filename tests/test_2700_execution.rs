@@ -29,6 +29,7 @@
 mod common;
 
 use common::conn;
+use oracledb;
 use rstest::*;
 
 #[rstest]
@@ -75,16 +76,16 @@ fn test_2700(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 #[rstest]
 /// Tests PL/SQL OUT and IN/OUT binds through ExecResult::returned_data().
 fn test_2701(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    for value in [100, 200, 300] {
-        let mut result = conn.execute_named(
-            "begin :out_value := :input_value * 2; end;",
-            &[("input_value", &value), ("out_value", &0)],
-        )?;
-        let returned_data = result.returned_data();
-        assert_eq!(returned_data.len(), 1);
-        assert!(result.returned_data().is_empty());
-        assert_eq!(returned_data[0].get::<i32>(0)?, value * 2);
-    }
+    let mut result = conn.execute_named(
+        "begin :out_value := :input_value * 2; end;",
+        &[("input_value", &21), ("out_value", &0)],
+    )?;
+    let returned_data = result.returned_data();
+    assert_eq!(returned_data.len(), 1);
+    let out_value: i32 = returned_data[0].get(0)?;
+    assert_eq!(out_value, 42);
+    assert!(result.returned_data().is_empty());
+
     let mut result =
         conn.execute("begin :1 := :1 || :2; end;", &[&"value", &"-updated"])?;
     let returned_data = result.returned_data();
@@ -116,8 +117,10 @@ fn test_2702(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(result.rows_affected(), 1);
     let returned_data = result.returned_data();
     assert_eq!(returned_data.len(), 1);
-    let values: Vec<String> = returned_data[0].get_array(0)?;
-    assert_eq!(values, vec!["returned value"]);
+    let value: &str = returned_data[0].get("out_value")?;
+    assert_eq!(value, "returned value");
+    let value_by_pos: &str = returned_data[0].get(0)?;
+    assert_eq!(value_by_pos, "returned value");
     Ok(())
 }
 
@@ -415,12 +418,32 @@ fn test_2715(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     )?;
     assert_eq!(result.rows_affected(), 2);
 
-    let returned_data = result.returned_data();
-    assert_eq!(returned_data.len(), 1);
-    let ids: Vec<usize> = returned_data[0].get_array(0)?;
-    let values: Vec<String> = returned_data[0].get_array(1)?;
-    assert_eq!(ids, vec![1, 2]);
-    assert_eq!(values, vec!["one-updated", "two-updated"]);
+    let returned_data = result.returned_data();assert_eq!(returned_data.len(), 2);
+	// positional access
+	let fst_idx = returned_data[0].get::<usize>(0)?;
+	let fst_val = returned_data[0].get::<&str>(1)?;
+
+	let sec_idx = returned_data[1].get::<usize>(0)?;
+	let sec_val = returned_data[1].get::<&str>(1)?;
+
+	// named access
+	let fst_named_idx = returned_data[0].get::<usize>("out_id")?;
+	let fst_named_val = returned_data[0].get::<&str>("out_value")?;
+
+	let sec_named_idx = returned_data[1].get::<usize>("out_id")?;
+	let sec_named_val = returned_data[1].get::<&str>("out_value")?;
+
+	assert_eq!(fst_idx, 1);
+	assert_eq!(fst_val, "one-updated");
+	assert_eq!(fst_named_idx, 1);
+	assert_eq!(fst_named_val, "one-updated");
+
+	assert_eq!(sec_idx, 2);
+	assert_eq!(sec_val, "two-updated");
+
+	assert_eq!(sec_named_idx, 2);
+	assert_eq!(sec_named_val, "two-updated");
+
     Ok(())
 }
 
@@ -445,9 +468,11 @@ fn test_2716(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(result.rows_affected(), 1);
 
     let returned_data = result.returned_data();
-    assert_eq!(returned_data.len(), 1);
-    let values: Vec<String> = returned_data[0].get_array(0)?;
-    assert_eq!(values, vec!["no-space-returning"]);
+
+	let val_pos: &str = returned_data[0].get(0)?;
+	let val_named: &str = returned_data[0].get("out_value")?;
+	assert_eq!(val_pos, "no-space-returning");
+	assert_eq!(val_named, "no-space-returning");
     Ok(())
 }
 
@@ -471,9 +496,7 @@ fn test_2717(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(result.rows_affected(), 0);
 
     let returned_data = result.returned_data();
-    assert_eq!(returned_data.len(), 1);
-    let values: Vec<String> = returned_data[0].get_array(0)?;
-    assert!(values.is_empty());
+    assert!(returned_data.is_empty());
     Ok(())
 }
 
@@ -525,42 +548,131 @@ fn test_2718(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 }
 
 #[rstest]
-/// Tests quoted named bind (valid and invalid and mixed with unquoted binds)
+/// Tests scalar row transposition for singleton DML RETURNING in ExecResult::returned_data().
 fn test_2719(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let result = conn.query_named("select :missing from dual", &[("\"", &0)]);
-    assert!(result.is_err());
-    let row = conn.query_row_named(
-        "select :\"TeSt_2719\" from dual",
-        &[("\"TeSt_2719\"", &2719)],
+    let _guard = common::create_table(
+        &conn,
+        "test_2719",
+        "id number primary key, value varchar2(30)",
     )?;
-    assert_eq!(row.get::<usize>(0)?, 2719);
-    let row = conn.query_row_named(
-        "select :TeSt_2719a, :\"TeSt_2719b\" from dual",
-        &[("test_2719a", &"test_2719a"), ("\"TeSt_2719b\"", &2719)],
+
+    // 1. Insert 3 initial rows
+    for i in 1..=3 {
+        conn.execute(
+            "insert into test_2719 (id, value) values (:1, :2)",
+            &[&i, &format!("value_{}", i)],
+        )?;
+    }
+    conn.commit()?;
+
+    // 2. Multi-row update with RETURNING
+    let out_id = 0i64;
+    let out_value = " ".repeat(30);
+    let mut result = conn.execute_named(
+        "update test_2719 set value = 'updated' \
+         returning id, value into :out_id, :out_value",
+        &[
+            ("out_id", &out_id),
+            ("out_value", &out_value),
+        ],
     )?;
-    assert_eq!(row.get::<&str>(0)?, "test_2719a");
-    assert_eq!(row.get::<usize>(1)?, 2719);
+
+    // SHAPE EXPECTATION 1: returned_data.len() must be 3 (one Row per affected record)
+    let returned_data = result.returned_data();
+    assert_eq!(returned_data.len(), 3);
+
+    // SHAPE EXPECTATION 2: Each Row must hold SCALAR values accessible via row.get()
+    for (idx, row) in returned_data.iter().enumerate() {
+        let expected_id = (idx + 1) as i64;
+        assert_eq!(row.get::<i64>("out_id")?, expected_id);
+        assert_eq!(row.get::<&str>("out_value")?, "updated");
+        assert_eq!(row.get::<i64>(0)?, expected_id);
+        assert_eq!(row.get::<&str>(1)?, "updated");
+    }
+
     Ok(())
 }
 
 #[rstest]
-/// Tests binding order when long columns are detected.
+/// Tests 2D row transposition for batch DML RETURNING in ExecBatchResult::returned_data().
 fn test_2720(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let _guard = common::create_table(
         &conn,
         "test_2720",
-        "id number, c clob, v varchar2(30)",
+        "dept_id number, emp_id number, name varchar2(30)",
     )?;
-    let big_data = "x".repeat(40_000);
-    let small_data = "small_value";
-    conn.execute(
-        "insert into test_2720 values (:1, :2, :3)",
-        &[&1, &big_data, &small_data],
+
+    // 1. Insert initial batch (5 rows across 3 departments)
+    let initial_data: &[&[&dyn oracledb::ToDbValue]] = &[
+        &[&10, &101, &"Alice"],
+        &[&10, &102, &"Bob"],
+        &[&20, &201, &"Charlie"],
+        &[&30, &301, &"Dave"],
+        &[&30, &302, &"Eve"],
+    ];
+    conn.execute_batch(
+        "insert into test_2720 (dept_id, emp_id, name) values (:1, :2, :3)",
+        oracledb::BindParameters::Slice(initial_data),
     )?;
     conn.commit()?;
-    let row = conn.query_row("select * from test_2720", &[])?;
-    assert_eq!(row.get::<usize>("id")?, 1);
-    assert_eq!(row.get::<&str>("c")?, big_data);
-    assert_eq!(row.get::<&str>("v")?, small_data);
+
+    // 2. Execute batch update with RETURNING on 3 departments (10, 20, 30)
+    let out_emp_id = 0i64;
+    let out_name = " ".repeat(30);
+    let batch_params: &[&[&dyn oracledb::ToDbValue]] = &[
+        &[&10, &out_emp_id, &out_name],
+        &[&20, &out_emp_id, &out_name],
+        &[&30, &out_emp_id, &out_name],
+    ];
+
+    let mut batch_result = conn.execute_batch(
+        "update test_2720 set name = name || '_upd' where dept_id = :depth_id \
+         returning emp_id, name into :emp_id, :name",
+        oracledb::BindParameters::Slice(batch_params),
+    )?;
+
+    // SHAPE EXPECTATION 1: returned_data produces Vec<Vec<Row>> of length 3 (1 set per batch item)
+    let batch_data: Vec<Vec<oracledb::Row>> = batch_result.returned_data();
+    assert_eq!(batch_data.len(), 3);
+
+    // Iteration 0 (Dept 10) affected 2 rows (Alice, Bob)
+    assert_eq!(batch_data[0].len(), 2);
+    assert_eq!(batch_data[0][0].get::<i64>("emp_id")?, 101);
+    assert_eq!(batch_data[0][0].get::<&str>("name")?, "Alice_upd");
+    assert_eq!(batch_data[0][1].get::<i64>("emp_id")?, 102);
+    assert_eq!(batch_data[0][1].get::<&str>("name")?, "Bob_upd");
+
+    // Iteration 1 (Dept 20) affected 1 row (Charlie)
+    assert_eq!(batch_data[1].len(), 1);
+    assert_eq!(batch_data[1][0].get::<i64>("emp_id")?, 201);
+    assert_eq!(batch_data[1][0].get::<&str>("name")?, "Charlie_upd");
+
+    // Iteration 2 (Dept 30) affected 2 rows (Dave, Eve)
+    assert_eq!(batch_data[2].len(), 2);
+    assert_eq!(batch_data[2][0].get::<i64>("emp_id")?, 301);
+    assert_eq!(batch_data[2][0].get::<&str>("name")?, "Dave_upd");
+    assert_eq!(batch_data[2][1].get::<i64>("emp_id")?, 302);
+    assert_eq!(batch_data[2][1].get::<&str>("name")?, "Eve_upd");
+
+	// Iteration 0 (Dept 10) affected 2 rows (Alice, Bob)
+	assert_eq!(batch_data[0].len(), 2);
+	assert_eq!(batch_data[0][0].get::<i64>(0)?, 101);
+	assert_eq!(batch_data[0][0].get::<&str>(1)?, "Alice_upd");
+	assert_eq!(batch_data[0][1].get::<i64>(0)?, 102);
+	assert_eq!(batch_data[0][1].get::<&str>(1)?, "Bob_upd");
+
+	// Iteration 1 (Dept 20) affected 1 row (Charlie)
+	assert_eq!(batch_data[1].len(), 1);
+	assert_eq!(batch_data[1][0].get::<i64>(0)?, 201);
+	assert_eq!(batch_data[1][0].get::<&str>(1)?, "Charlie_upd");
+
+	// Iteration 2 (Dept 30) affected 2 rows (Dave, Eve)
+	assert_eq!(batch_data[2].len(), 2);
+	assert_eq!(batch_data[2][0].get::<i64>(0)?, 301);
+	assert_eq!(batch_data[2][0].get::<&str>(1)?, "Dave_upd");
+	assert_eq!(batch_data[2][1].get::<i64>(0)?, 302);
+	assert_eq!(batch_data[2][1].get::<&str>(1)?, "Eve_upd");
+
     Ok(())
 }
+

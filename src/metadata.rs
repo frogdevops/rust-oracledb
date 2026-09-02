@@ -162,6 +162,10 @@ impl Metadata {
             is_array: false,
         })
     }
+	/// Sets the name of the metadata
+	pub(crate) fn set_name(&mut self, name: String) {
+		self.name = name;
+	}
 
     /// Returns true if the column is null by describe.
     pub(crate) fn is_null_by_describe(&self) -> bool {
