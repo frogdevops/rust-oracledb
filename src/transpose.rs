@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use crate::db_value::DbValue;
+use crate::error::Error;
 use crate::{Metadata, Row};
 use crate::row::RowData;
 
@@ -17,18 +18,18 @@ impl RawColumnarData {
 /// Trait for converting raw database response data into structured, row-oriented formats.
 pub(crate) trait TransposeData {
 	type Output;
-	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Self::Output;
+	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Result<Self::Output, Error>;
 }
 
-// For Singleton (RawColumnarData -> Vec<Row>)
+// For Singleton (RawColumnarData -> Result<Vec<Row>, Error>)
 impl TransposeData for RawColumnarData {
 	type Output = Vec<Row>;
 
-	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Vec<Row> {
+	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Result<Vec<Row>, Error> {
 		let container_row = self.0;
 		let num_cols = container_row.len();
 		if num_cols == 0 {
-			return Vec::new();
+			return Ok(Vec::new());
 		}
 
 		// 1. Pre-flight Matrix Invariant Check:
@@ -41,13 +42,13 @@ impl TransposeData for RawColumnarData {
 			.collect();
 
 		let num_rows = match lengths.first() {
-			None => return vec![Row::new(column_info, container_row)],
+			None => return Ok(vec![Row::new(column_info, container_row)]),
 			Some(&len) if lengths.iter().all(|&l| l == len) => len,
-			Some(_) => panic!("Database returned ragged columnar data with mismatched row counts!"),
+			Some(_) => return Err(Error::unexpected_result()),
 		};
 
 		if num_rows == 0 {
-			return Vec::new();
+			return Ok(Vec::new());
 		}
 
 		// 2. Unpack columns:
@@ -71,15 +72,15 @@ impl TransposeData for RawColumnarData {
 			rows.push(Row::new(column_info, row_values));
 		}
 
-		rows
+		Ok(rows)
 	}
 }
 
-// For Batch (Vec<RawColumnarData> -> Vec<Vec<Row>>)
+// For Batch (Vec<RawColumnarData> -> Result<Vec<Vec<Row>>, Error>)
 impl TransposeData for Vec<RawColumnarData> {
 	type Output = Vec<Vec<Row>>;
 
-	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Vec<Vec<Row>> {
+	fn transpose(self, column_info: &Arc<Vec<Metadata>>) -> Result<Vec<Vec<Row>>, Error> {
 		self.into_iter()
 			.map(|raw_data| raw_data.transpose(column_info))
 			.collect()
