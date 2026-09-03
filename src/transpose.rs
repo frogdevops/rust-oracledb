@@ -31,27 +31,26 @@ impl TransposeData for RawColumnarData {
 		if num_cols == 0 {
 			return Ok(Vec::new());
 		}
-
-		// 1. Pre-flight Matrix Invariant Check:
-		let lengths: Vec<usize> = container_row
-			.iter()
-			.filter_map(|col| match col {
-				Some(DbValue::Array(arr)) => Some(arr.len()),
-				_ => None,
-			})
-			.collect();
-
-		let num_rows = match lengths.first() {
-			None => return Ok(vec![Row::new(column_info, container_row)]),
-			Some(&len) if lengths.iter().all(|&l| l == len) => len,
-			Some(_) => return Err(Error::unexpected_result()),
-		};
-
-		if num_rows == 0 {
-			return Ok(Vec::new());
+		// read only check
+		let mut num_rows: Option<usize> = None;
+		for col_opt in container_row.iter() {
+			if let Some(DbValue::Array(arr)) = col_opt {
+				match num_rows {
+					None => num_rows = Some(arr.len()),
+					Some(expected) if expected != arr.len() => {
+						return Err(Error::unexpected_result()); // ragged wire guard
+					}
+					_ => {}
+				}
+			}
 		}
 
-		// 2. Unpack columns:
+		let num_rows = match num_rows {
+			None => return Ok(vec![Row::new(column_info, container_row)]),
+			Some(0) => return Ok(Vec::new()),
+			Some(len) => len,
+		};
+
 		let mut columns: Vec<Vec<Option<DbValue>>> = Vec::with_capacity(num_cols);
 		for col_opt in container_row {
 			match col_opt {
@@ -61,7 +60,6 @@ impl TransposeData for RawColumnarData {
 			}
 		}
 
-		// 3. Fast Pointer Lockstep Transposition:
 		let mut iters: Vec<_> = columns.iter_mut().map(|c| c.iter_mut()).collect();
 		let mut rows = Vec::with_capacity(num_rows);
 		for _ in 0..num_rows {
