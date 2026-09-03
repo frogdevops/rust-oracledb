@@ -2,15 +2,15 @@ use std::sync::Arc;
 use crate::db_value::DbValue;
 use crate::error::Error;
 use crate::{Metadata, Row};
-use crate::row::RowData;
+use crate::row::DbRow;
 
 /// Opaque wrapper ensuring a statement's raw columnar wire container
 /// MUST be transposed before it can be converted into `Row` structs.
-pub(crate) struct RawColumnarData(RowData);
+pub(crate) struct RawColumnarData(DbRow);
 
 impl RawColumnarData {
 	/// Creates a new opaque wrapper around a statement's raw wire container.
-	pub(crate) fn new(data: RowData) -> Self {
+	pub(crate) fn new(data: DbRow) -> Self {
 		Self(data)
 	}
 }
@@ -31,7 +31,6 @@ impl TransposeData for RawColumnarData {
 		if num_cols == 0 {
 			return Ok(Vec::new());
 		}
-		// read only check
 		let mut num_rows: Option<usize> = None;
 		for col_opt in container_row.iter() {
 			if let Some(DbValue::Array(arr)) = col_opt {
@@ -52,11 +51,18 @@ impl TransposeData for RawColumnarData {
 		};
 
 		let mut columns: Vec<Vec<Option<DbValue>>> = Vec::with_capacity(num_cols);
-		for col_opt in container_row {
+		for col_opt in container_row.into_inner() {
 			match col_opt {
-				Some(DbValue::Array(arr)) => columns.push(arr),
-				Some(scalar) => columns.push(vec![Some(scalar); num_rows]),
-				None => columns.push(vec![None; num_rows]),
+				Some(DbValue::Array(arr)) => columns.push(arr.into_inner()),
+				Some(scalar) => {
+					let mut col_vec = Vec::with_capacity(num_rows);
+					let scalar_opt = Some(scalar);
+					for _ in 0..num_rows {
+						col_vec.push(DbRow::clone_value(&scalar_opt));
+					}
+					columns.push(col_vec);
+				}
+				None => columns.push((0..num_rows).map(|_| None).collect()),
 			}
 		}
 
@@ -67,7 +73,7 @@ impl TransposeData for RawColumnarData {
 			for it in iters.iter_mut() {
 				row_values.push(it.next().and_then(|opt| opt.take()));
 			}
-			rows.push(Row::new(column_info, row_values));
+			rows.push(Row::new(column_info, DbRow::new(row_values)));
 		}
 
 		Ok(rows)

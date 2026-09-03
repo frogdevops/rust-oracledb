@@ -43,7 +43,7 @@ impl DbRow {
     /// Clones a column in the row. All values except Cursors and Lobs are
     /// cloned. Cursors and Lobs become null in the cloned row because they may
     /// not be cloned.
-    fn clone_value(value: &Option<DbValue>) -> Option<DbValue> {
+    pub(crate) fn clone_value(value: &Option<DbValue>) -> Option<DbValue> {
         match value {
             Some(DbValue::Array(v)) => Some(DbValue::Array(v.clone())),
             Some(DbValue::BinaryDouble(v)) => Some(DbValue::BinaryDouble(*v)),
@@ -82,6 +82,27 @@ impl DbRow {
     /// Clones the value at the specified index.
     pub(crate) fn clone_column(&self, index: usize) -> Option<DbValue> {
         Self::clone_value(&self.column_values[index])
+    }
+
+    /// Returns the number of column values in the row.
+    pub(crate) fn len(&self) -> usize {
+        self.column_values.len()
+    }
+
+    /// Returns true if the row contains no column values.
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.column_values.is_empty()
+    }
+
+    /// Unwraps the inner vector of column values.
+    pub(crate) fn into_inner(self) -> Vec<Option<DbValue>> {
+        self.column_values
+    }
+
+    /// Returns an iterator over the column values.
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, Option<DbValue>> {
+        self.column_values.iter()
     }
 
     /// Creates a new database value row from a set of column values
