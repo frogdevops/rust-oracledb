@@ -84,6 +84,18 @@ impl ExecResult {
             Ok(Vec::new())
         }
     }
+
+	/// Returns the single row returned by the database as OUT variables
+	/// (PL/SQL or RETURNING statements). If no rows were returned, a
+	/// NoDataFound error is returned instead. This transfers ownership of the
+	/// returned data to the caller.
+	pub fn returned_row(&mut self) -> Result<Row, Error> {
+		let mut rows = self.returned_data()?;
+		if let Some(row) = rows.pop() {
+			return Ok(row);
+		}
+		Err(Error::no_data_found())
+	}
 }
 
 impl ExecBatchResult {
