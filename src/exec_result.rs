@@ -30,17 +30,27 @@
 
 use std::sync::Arc;
 
+use crate::error::Error;
 use crate::metadata::Metadata;
 use crate::response::Response;
-use crate::row::{DbRow, Row};
+use crate::row::Row;
+use crate::transpose::{RawColumnarData, TransposeData};
 
 /// Represents the result returned by the database when calling
-/// [Connection::execute()](`crate::Connection::execute()`),
-/// [Connection::execute_named()](`crate::Connection::execute_named()`), or
-/// [Connection::execute_batch()](`crate::Connection::execute_batch()`).
+/// [Connection::execute()](`crate::Connection::execute()`) or
+/// [Connection::execute_named()](`crate::Connection::execute_named()`).
 pub struct ExecResult {
     column_info: Arc<Vec<Metadata>>,
-    returned_data: Option<Vec<DbRow>>,
+    returned_data: Option<RawColumnarData>,
+    rows_affected: u64,
+}
+
+/// Represents the result returned by the database when calling
+/// [Connection::execute_batch()](`crate::Connection::execute_batch()`) or
+/// [Statement::execute_batch()](`crate::Statement::execute_batch()`).
+pub struct ExecBatchResult {
+    column_info: Arc<Vec<Metadata>>,
+    returned_data: Option<Vec<RawColumnarData>>,
     rows_affected: u64,
 }
 
@@ -51,7 +61,10 @@ impl ExecResult {
     ) -> ExecResult {
         ExecResult {
             column_info: Arc::new(column_info.to_vec()),
-            returned_data: resp.take_rows(),
+            returned_data: resp
+                .take_rows()
+                .and_then(|mut v| v.pop())
+                .map(RawColumnarData::new),
             rows_affected: resp.get_rowcount(),
         }
     }
@@ -62,17 +75,61 @@ impl ExecResult {
     }
 
     /// Returns data returned by the database as OUT variables (PL/SQL or
-    /// RETURNING statements. This transfers ownership of the returned data to
+    /// RETURNING statements). This transfers ownership of the returned data to
     /// the caller.
-    pub fn returned_data(&mut self) -> Vec<Row> {
-        if let Some(returned_data) = self.returned_data.take() {
-            let mut rows = Vec::<Row>::with_capacity(returned_data.len());
-            for column_values in returned_data {
-                rows.push(Row::new(&self.column_info, column_values));
-            }
-            rows
+    pub fn returned_data(&mut self) -> Result<Vec<Row>, Error> {
+        if let Some(raw_data) = self.returned_data.take() {
+            raw_data.transpose(&self.column_info)
         } else {
-            Vec::<Row>::new()
+            Ok(Vec::new())
+        }
+    }
+
+    /// Returns the single row returned by the database as OUT variables
+    /// (PL/SQL or RETURNING statements). If no rows were returned, a
+    /// NoDataFound error is returned instead. If more than 1 row was returned,
+    /// an OutOfRange error is returned. This transfers ownership of the
+    /// returned data to the caller.
+    pub fn returned_row(&mut self) -> Result<Row, Error> {
+        let rows = self.returned_data()?;
+        match rows.len() {
+            0 => Err(Error::no_data_found()),
+            1 => Ok(rows.into_iter().next().unwrap()),
+            n => Err(Error::out_of_range(format!(
+                "expected exactly 1 returned row, but found {}",
+                n
+            ))),
+        }
+    }
+}
+
+impl ExecBatchResult {
+    pub(crate) fn new(
+        column_info: &[Metadata],
+        resp: &mut Response,
+    ) -> ExecBatchResult {
+        ExecBatchResult {
+            column_info: Arc::new(column_info.to_vec()),
+            returned_data: resp
+                .take_rows()
+                .map(|rows| rows.into_iter().map(RawColumnarData::new).collect()),
+            rows_affected: resp.get_rowcount(),
+        }
+    }
+
+    /// Returns the total number of rows affected by the execution of the batch.
+    pub fn rows_affected(&self) -> u64 {
+        self.rows_affected
+    }
+
+    /// Returns data returned by the database as OUT variables (PL/SQL or
+    /// RETURNING statements) for each execution in the batch. This transfers
+    /// ownership of the returned data to the caller.
+    pub fn returned_data(&mut self) -> Result<Vec<Vec<Row>>, Error> {
+        if let Some(batch_data) = self.returned_data.take() {
+            batch_data.transpose(&self.column_info)
+        } else {
+            Ok(Vec::new())
         }
     }
 }
