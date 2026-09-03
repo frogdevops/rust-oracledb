@@ -85,17 +85,22 @@ impl ExecResult {
         }
     }
 
-	/// Returns the single row returned by the database as OUT variables
-	/// (PL/SQL or RETURNING statements). If no rows were returned, a
-	/// NoDataFound error is returned instead. This transfers ownership of the
-	/// returned data to the caller.
-	pub fn returned_row(&mut self) -> Result<Row, Error> {
-		let mut rows = self.returned_data()?;
-		if let Some(row) = rows.pop() {
-			return Ok(row);
-		}
-		Err(Error::no_data_found())
-	}
+    /// Returns the single row returned by the database as OUT variables
+    /// (PL/SQL or RETURNING statements). If no rows were returned, a
+    /// NoDataFound error is returned instead. If more than 1 row was returned,
+    /// an OutOfRange error is returned. This transfers ownership of the
+    /// returned data to the caller.
+    pub fn returned_row(&mut self) -> Result<Row, Error> {
+        let rows = self.returned_data()?;
+        match rows.len() {
+            0 => Err(Error::no_data_found()),
+            1 => Ok(rows.into_iter().next().unwrap()),
+            n => Err(Error::out_of_range(format!(
+                "expected exactly 1 returned row, but found {}",
+                n
+            ))),
+        }
+    }
 }
 
 impl ExecBatchResult {

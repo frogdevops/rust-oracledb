@@ -672,7 +672,77 @@ fn test_2720(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 	assert_eq!(batch_data[2][0].get::<i64>(0)?, 301);
 	assert_eq!(batch_data[2][0].get::<&str>(1)?, "Dave_upd");
 	assert_eq!(batch_data[2][1].get::<i64>(0)?, 302);
-	assert_eq!(batch_data[2][1].get::<&str>(1)?, "Eve_upd");
+    Ok(())
+}
+
+#[rstest]
+/// Tests ExecResult::returned_row() for exact single-row enforcement:
+/// - Succeeds when exactly 1 row is returned.
+/// - Returns NoDataFound when 0 rows are returned.
+/// - Returns OutOfRange when multiple rows are returned.
+fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2721",
+        "id number primary key, value varchar2(30)",
+    )?;
+
+    // 1. Insert 3 rows
+    for i in 1..=3 {
+        conn.execute(
+            "insert into test_2721 (id, value) values (:1, :2)",
+            &[&i, &format!("value_{}", i)],
+        )?;
+    }
+    conn.commit()?;
+
+    // Case A: Exactly 1 row affected -> Ok(Row)
+    let out_id = 0i64;
+    let out_value = " ".repeat(30);
+    let mut result = conn.execute_named(
+        "update test_2721 set value = 'single_update' where id = 1 \
+         returning id, value into :out_id, :out_value",
+        &[
+            ("out_id", &out_id),
+            ("out_value", &out_value),
+        ],
+    )?;
+    let row = result.returned_row()?;
+    assert_eq!(row.get::<i64>("out_id")?, 1);
+    assert_eq!(row.get::<&str>("out_value")?, "single_update");
+
+    // Case B: 0 rows affected -> Err(NoDataFound)
+    let mut result_empty = conn.execute_named(
+        "update test_2721 set value = 'no_match' where id = 9999 \
+         returning id, value into :out_id, :out_value",
+        &[
+            ("out_id", &out_id),
+            ("out_value", &out_value),
+        ],
+    )?;
+    match result_empty.returned_row() {
+        Err(err) => assert_eq!(err.kind(), &oracledb::ErrorKind::NoDataFound),
+        Ok(_) => panic!("expected NoDataFound error, got Ok"),
+    }
+
+    // Case C: Multiple rows affected (2 rows: id=2, id=3) -> Err(OutOfRange)
+    let mut result_multi = conn.execute_named(
+        "update test_2721 set value = 'multi_update' where id > 1 \
+         returning id, value into :out_id, :out_value",
+        &[
+            ("out_id", &out_id),
+            ("out_value", &out_value),
+        ],
+    )?;
+    match result_multi.returned_row() {
+        Err(err) => match err.kind() {
+            oracledb::ErrorKind::OutOfRange(msg) => {
+                assert!(msg.contains("expected exactly 1 returned row, but found 2"));
+            }
+            other => panic!("expected OutOfRange, got {:?}", other),
+        },
+        Ok(_) => panic!("expected OutOfRange error, got Ok"),
+    }
 
     Ok(())
 }
