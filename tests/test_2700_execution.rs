@@ -747,3 +747,54 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     Ok(())
 }
 
+#[rstest]
+/// Tests query_row and query_row_named for exact single-row enforcement:
+/// - Succeeds when exactly 1 row is returned.
+/// - Returns NoDataFound when 0 rows are returned.
+/// - Returns OutOfRange when multiple rows are returned.
+fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    // 1. Exactly 1 row -> Ok(Row)
+    let row = conn.query_row("select 42 from dual", &[])?;
+    assert_eq!(row.get::<i64>(0)?, 42);
+
+    let row_named = conn.query_row_named("select :val as v from dual", &[("val", &"hello")])?;
+    assert_eq!(row_named.get::<&str>(0)?, "hello");
+
+    // 2. 0 rows -> Err(NoDataFound)
+    match conn.query_row("select 1 from dual where 1 = 0", &[]) {
+        Err(err) => assert_eq!(err.kind(), &oracledb::ErrorKind::NoDataFound),
+        Ok(_) => panic!("expected NoDataFound, got Ok"),
+    }
+    match conn.query_row_named("select :v from dual where 1 = 0", &[("v", &1)]) {
+        Err(err) => assert_eq!(err.kind(), &oracledb::ErrorKind::NoDataFound),
+        Ok(_) => panic!("expected NoDataFound, got Ok"),
+    }
+
+    // 3. Multiple rows -> Err(OutOfRange)
+    // Using dual connect by level (returns 3 rows: 1, 2, 3)
+    match conn.query_row("select level from dual connect by level <= 3", &[]) {
+        Err(err) => match err.kind() {
+            oracledb::ErrorKind::OutOfRange(msg) => {
+                assert!(msg.contains("expected exactly 1 row, but multiple rows were returned"));
+            }
+            other => panic!("expected OutOfRange, got {:?}", other),
+        },
+        Ok(_) => panic!("expected OutOfRange, got Ok"),
+    }
+
+    match conn.query_row_named(
+        "select level from dual connect by level <= :limit",
+        &[("limit", &5)],
+    ) {
+        Err(err) => match err.kind() {
+            oracledb::ErrorKind::OutOfRange(msg) => {
+                assert!(msg.contains("expected exactly 1 row, but multiple rows were returned"));
+            }
+            other => panic!("expected OutOfRange, got {:?}", other),
+        },
+        Ok(_) => panic!("expected OutOfRange, got Ok"),
+    }
+
+    Ok(())
+}
+

@@ -178,28 +178,37 @@ impl<'sql> Statement<'sql> {
         Ok(cursor)
     }
 
-    /// Executes the statement with the given parameters and returns the first
+    /// Executes the statement with the given parameters and returns the single
     /// row supplied by the database. If no rows are found, a NoDataFound error
-    /// is returned instead.
+    /// is returned. If multiple rows are found, an OutOfRange error is returned.
     pub fn query_row(&self, params: &[&dyn ToDbValue]) -> Result<Row, Error> {
         let mut cursor = self.query(params)?;
-        if let Some(row) = cursor.next() {
-            return row;
+        match (cursor.next(), cursor.next()) {
+            (None, _) => Err(Error::no_data_found()),
+            (Some(Ok(row)), None) => Ok(row),
+            (Some(Ok(_)), Some(_)) => Err(Error::out_of_range(
+                "expected exactly 1 row, but multiple rows were returned",
+            )),
+            (Some(Err(e)), _) => Err(e),
         }
-        Err(Error::no_data_found())
     }
 
-    /// Executes the statement with the given parameters and returns the first
-    /// row supplied by the database. If no rows are found, a NoDataFound error
-    /// is returned instead.
+    /// Executes the statement with the given parameters using named binds and
+    /// returns the single row supplied by the database. If no rows are found,
+    /// a NoDataFound error is returned. If multiple rows are found, an OutOfRange
+    /// error is returned.
     pub fn query_row_named(
         &self,
         params: &[(&str, &dyn ToDbValue)],
     ) -> Result<Row, Error> {
         let mut cursor = self.query_named(params)?;
-        if let Some(row) = cursor.next() {
-            return row;
+        match (cursor.next(), cursor.next()) {
+            (None, _) => Err(Error::no_data_found()),
+            (Some(Ok(row)), None) => Ok(row),
+            (Some(Ok(_)), Some(_)) => Err(Error::out_of_range(
+                "expected exactly 1 row, but multiple rows were returned",
+            )),
+            (Some(Err(e)), _) => Err(e),
         }
-        Err(Error::no_data_found())
     }
 }
