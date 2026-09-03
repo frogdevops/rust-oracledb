@@ -71,6 +71,7 @@ impl Connection {
             let mut pool_contents = pool_contents_ref.lock().unwrap();
             let mut conn_impl = self.conn_impl.take().unwrap();
             conn_impl.clear_end_user_security_context()?;
+            conn_impl.rollback()?;
             conn_impl.set_returned_to_pool();
             pool_contents.return_connection(conn_impl);
             Ok(())

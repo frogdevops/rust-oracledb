@@ -211,7 +211,7 @@ impl Row {
     }
 
     /// Returns the array at the given column index as a vector.
-    pub fn take_array<'a, T>(
+    pub fn take_array<'a, T> (
         &'a mut self,
         col_index: impl ColumnIndex,
     ) -> Result<Vec<T>, Error>
