@@ -26,6 +26,8 @@
 // test_2900_pool()
 //-----------------------------------------------------------------------------
 
+mod common;
+
 fn pool_config(
     min_connections: usize,
     max_connections: usize,
@@ -116,61 +118,25 @@ fn test_2903() -> Result<(), oracledb::Error> {
 }
 
 #[test]
-/// Tests that uncommitted transactions are automatically rolled back when a
-/// connection is returned to the pool, preventing transaction state leakage.
+/// Verifies releasing a pooled connection rolls back uncommitted work before
+/// the physical session can be acquired again.
 fn test_2904() -> Result<(), oracledb::Error> {
-    let test_config = oracledb::get_test_config();
-    let standalone_conn = oracledb::connect(
-        oracledb::Config::default()
-            .set_credentials(&test_config.user, &test_config.password)
-            .set_connect_string(&test_config.connect_string)?,
-    )?;
+    let observer = common::conn();
+    let _guard = common::create_table(&observer, "test_2904", "id number")?;
+    let mut pool = oracledb::create_pool(pool_config(0, 1, 1)?)?;
 
-    // 1. Setup a test table
-    standalone_conn.execute(
-        "begin execute immediate 'drop table test_2904'; exception when others then null; end;",
-        &[],
-    )?;
-    standalone_conn.execute(
-        "create table test_2904 (id number primary key, val varchar2(50))",
-        &[],
-    )?;
-    standalone_conn.execute(
-        "insert into test_2904 (id, val) values (1, 'ORIGINAL')",
-        &[],
-    )?;
-    standalone_conn.commit()?;
+    let mut first = pool.acquire()?;
+    let first_session_id = first.session_id()?;
+    first.execute("insert into test_2904 values (1)", &[])?;
+    first.close()?;
 
-    // 2. Pool with max_connections = 1 to ensure session reuse
-    let pool = oracledb::create_pool(pool_config(1, 1, 1)?)?;
+    let mut second = pool.acquire()?;
+    assert_eq!(second.session_id()?, first_session_id);
+    let row = second.query_row("select count(*) from test_2904", &[])?;
+    let count: i32 = row.get(0)?;
+    second.close()?;
+    pool.close()?;
 
-    // Request 1: Mutates data but drops connection without commit
-    {
-        let conn = pool.acquire()?;
-        conn.execute(
-            "update test_2904 set val = 'POISONED' where id = 1",
-            &[],
-        )?;
-        // conn drops here without commit()
-    }
-
-    // Request 2: Acquires the recycled connection and commits its own work
-    {
-        let conn = pool.acquire()?;
-        conn.execute("begin null; end;", &[])?;
-        conn.commit()?;
-    }
-
-    // 3. Verify that Request 1's uncommitted update was rolled back
-    let row = standalone_conn.query_row(
-        "select val from test_2904 where id = 1",
-        &[],
-    )?;
-    let val: String = row.get(0)?;
-    assert_eq!(val, "ORIGINAL");
-
-    // Cleanup
-    standalone_conn.execute("drop table test_2904", &[])?;
-    standalone_conn.commit()?;
+    assert_eq!(count, 0, "pooled release leaked an open transaction");
     Ok(())
 }

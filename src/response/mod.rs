@@ -37,7 +37,9 @@ use crate::client::Client;
 use crate::client::ClientRef;
 use crate::constants;
 use crate::db_value::DbValue;
+use crate::db_value::PendingDbValue;
 use crate::error::Error;
+use crate::metadata::Metadata;
 use crate::packet::Packet;
 use crate::read_buffer::FromBuf;
 use crate::read_buffer::FromBufFallible;
@@ -52,29 +54,35 @@ pub(crate) struct Response {
     packet_flags: u8,
     buf: ReadBuffer,
     error_info: Option<ErrorInfo>,
-    client_ref: Option<ClientRef>,
     edition: Option<String>,
     current_schema: Option<String>,
     warning: Option<String>,
     rows: Option<Vec<DbRow>>,
+    pending_values: Vec<Option<PendingDbValue>>,
     prev_fetch_last_row: Option<DbRow>,
     bit_vector: Option<Vec<u8>>,
     num_columns: usize,
+    call_status: u32,
     end_of_fetch: bool,
 }
 
 impl Response {
-    pub(crate) fn get_client_ref(&self) -> ClientRef {
-        self.client_ref.clone().unwrap()
-    }
-
-    pub(crate) fn set_client_ref(&mut self, client_ref: ClientRef) {
-        self.client_ref = Some(client_ref);
+    /// Records one pending value position while deserializing rows.
+    pub(crate) fn add_pending_db_value(
+        &mut self,
+        value: Option<PendingDbValue>,
+    ) {
+        self.pending_values.push(value);
     }
 
     pub(crate) fn advance(&mut self, cnt: usize) -> Result<(), Error> {
         self.buf.read_bytes(cnt)?;
         Ok(())
+    }
+
+    /// Returns the call status of the response.
+    pub(crate) fn call_status(&self) -> u32 {
+        self.call_status
     }
 
     pub(crate) fn check_for_end_of_fetch(
@@ -99,6 +107,15 @@ impl Response {
             }
         }
         Ok(())
+    }
+
+    /// Queues cursors created before response deserialization failed.
+    pub(crate) fn cleanup_pending_values(&mut self, client: &mut Client) {
+        for value in std::mem::take(&mut self.pending_values) {
+            if let Some(PendingDbValue::Cursor(statement)) = value {
+                client.return_statement(&statement);
+            }
+        }
     }
 
     pub(crate) fn deserialize_bit_vector(&mut self) -> Result<(), Error> {
@@ -208,6 +225,13 @@ impl Response {
         Ok(())
     }
 
+    /// Deserializes call status from the buffer.
+    pub(crate) fn deserialize_status(&mut self) -> Result<(), Error> {
+        self.call_status = self.read_ub4()?;
+        let _seq_num = self.read_ub2()?;
+        Ok(())
+    }
+
     pub(crate) fn deserialize_warning(&mut self) -> Result<(), Error> {
         let error_num = self.read_ub2()?;
         let num_bytes = self.read_ub2()?;
@@ -217,6 +241,32 @@ impl Response {
             self.warning = Some(message.trim_end().to_string());
         }
         Ok(())
+    }
+
+    /// Finalizes pending LOB and cursor values after deserialization.
+    pub(crate) fn finalize_rows(
+        &mut self,
+        client_ref: &ClientRef,
+        metadata: &[Metadata],
+    ) {
+        let values = std::mem::take(&mut self.pending_values);
+        if !values.is_empty() {
+            let column_nums: Vec<usize> = metadata
+                .iter()
+                .enumerate()
+                .filter_map(|(column_num, metadata)| {
+                    metadata.should_defer_value().then_some(column_num)
+                })
+                .collect();
+            let mut values = values.into_iter();
+            for row in self.rows.as_mut().unwrap() {
+                for column_num in &column_nums {
+                    if let Some(data) = values.next().unwrap() {
+                        row.finalize_column(*column_num, client_ref, data);
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn get_cursor_id(&self) -> u16 {
@@ -274,21 +324,21 @@ impl Response {
         self.end_of_fetch
     }
 
-    pub(crate) fn new(packets: &[Packet]) -> Response {
-        let packet = packets.first().unwrap();
+    pub(crate) fn new() -> Response {
         Response {
-            packet_type: packet.packet_type,
-            packet_flags: packet.packet_flags,
-            buf: ReadBuffer::from_packets(packets),
+            packet_type: 0,
+            packet_flags: 0,
+            buf: ReadBuffer::from_packets(&[]),
             error_info: None,
-            client_ref: None,
             edition: None,
             current_schema: None,
             warning: None,
             rows: None,
+            pending_values: Vec::new(),
             prev_fetch_last_row: None,
             bit_vector: None,
             num_columns: 0,
+            call_status: 0,
             end_of_fetch: false,
         }
     }
@@ -458,12 +508,16 @@ impl Response {
     /// that state must be reset so that it doesn't interfere with another
     /// attempt at deserializing the response.
     pub(crate) fn reset(&mut self, packets: &[Packet]) {
+        let packet = packets.first().unwrap();
+        self.packet_type = packet.packet_type;
+        self.packet_flags = packet.packet_flags;
         self.buf = ReadBuffer::from_packets(packets);
         self.error_info = None;
         self.edition = None;
         self.current_schema = None;
         self.warning = None;
         self.rows = None;
+        self.pending_values.clear();
         self.bit_vector = None;
         self.end_of_fetch = false;
     }

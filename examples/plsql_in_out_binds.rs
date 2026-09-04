@@ -23,34 +23,61 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// plsql_in_out_binds.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows using positional and named IN/OUT binds with PL/SQL.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    connection.execute(
+        r#"
+        create or replace procedure rso_examples_proc (
+            p1 in number,
+            p2 in out varchar2
+        ) as
+        begin
+            p2 := p2 || ' ' || p1;
+        end;
+        "#,
+        &[],
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
+    // positional bind variables
+    let data = [(440, "Gregory"), (550, "Haley"), (660, "Ian")];
+    let mut outvals = Vec::new();
+
+    for (p1, p2) in data {
+        let mut result = connection
+            .execute("begin rso_examples_proc(:1, :2); end;", &[&p1, &p2])?;
+
+        let rows = result.returned_data()?;
+        let outval: String = rows[0].get(0)?;
+
+        outvals.push(outval);
     }
+    println!("Positional binds: {outvals:?}");
+
+    // named bind variables
+    let data = [(440, "Julia"), (550, "Tina"), (660, "Tracy")];
+    let mut outvals = Vec::new();
+
+    for (p1, p2) in data {
+        let mut result = connection.execute_named(
+            "begin rso_examples_proc(:p1, :p2); end;",
+            &[("p1", &p1), ("p2", &p2)],
+        )?;
+
+        let rows = result.returned_data()?;
+        let outval: String = rows[0].get(0)?;
+
+        outvals.push(outval);
+    }
+    println!("Named binds: {outvals:?}");
+
     Ok(())
 }

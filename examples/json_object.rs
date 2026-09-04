@@ -23,34 +23,58 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// json_object.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows how to use JSON_OBJECT to return rows as JSON values.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    // native JSON columns require Oracle Database 21 or later
+    let version = connection.version()?;
+    if version.0 < 21 {
+        println!("JSON columns require Oracle Database 21 or later.");
+        return Ok(());
+    }
+
+    let _guard = common::create_table(
+        &connection,
+        "rso_examples_departments",
+        "id number primary key, name varchar2(100)",
+    )?;
+    let rows = oracledb::BindParameters::Slice(&[
+        &[&10, &"Administration"],
+        &[&20, &"Marketing"],
+        &[&30, &"Purchasing"],
+        &[&40, &"Human Resources"],
+    ]);
+    connection.execute_batch(
+        "insert into rso_examples_departments values (:1, :2)",
+        rows,
+    )?;
+    connection.commit()?;
+
+    let cursor = connection.query(
+        r#"select json_object(
+              'deptId' value d.id,
+              'name' value d.name
+              returning json
+          ) department
+        from rso_examples_departments d
+        where id in (:1, :2, :3, :4)
+        order by d.name"#,
+        &[&10, &20, &30, &40],
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
+    for row_result in cursor {
+        let row = row_result?;
+        let department: oracledb::JsonValue = row.get(0)?;
+        println!("{department:?}");
     }
+
     Ok(())
 }

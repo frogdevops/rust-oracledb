@@ -23,34 +23,45 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// plsql_out_binds.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows using positional and named OUT binds with PL/SQL.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    connection.execute(
+        r#"
+        create or replace procedure rso_examples_proc (
+            p1 in number,
+            p2 out number
+        ) as
+        begin
+            p2 := p1 * 2;
+        end;
+        "#,
+        &[],
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
-    }
+    // positional bind variables
+    let mut result = connection
+        .execute("begin rso_examples_proc(:1, :2); end;", &[&100, &0])?;
+    let rows = result.returned_data()?;
+    let p2: i32 = rows[0].get(0)?;
+    println!("{p2}");
+
+    // named bind variables
+    let mut result = connection.execute_named(
+        "begin rso_examples_proc(:p1, :p2); end;",
+        &[("p1", &200), ("p2", &0)],
+    )?;
+    let rows = result.returned_data()?;
+    let p2: i32 = rows[0].get(0)?;
+    println!("{p2}");
+
     Ok(())
 }

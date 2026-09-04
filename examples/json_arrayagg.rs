@@ -23,34 +23,50 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// json_arrayagg.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows how to use JSON_ARRAYAGG to return rows as JSON text.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    let _guard = common::create_table(
+        &connection,
+        "rso_examples_departments",
+        "id number primary key, name varchar2(100)",
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
-    }
+    let rows = oracledb::BindParameters::Slice(&[
+        &[&10, &"Administration"],
+        &[&20, &"Marketing"],
+        &[&30, &"Purchasing"],
+        &[&40, &"Human Resources"],
+    ]);
+
+    connection.execute_batch(
+        "insert into rso_examples_departments values (:1, :2)",
+        rows,
+    )?;
+
+    let row = connection.query_row_named(
+        r#"
+        select json_arrayagg(
+            json_object(
+                'deptid' value d.id,
+                'name' value d.name
+            ) returning clob
+        )
+        from rso_examples_departments d
+        where id in (:did1, :did2, :did3, :did4)"#,
+        &[("did1", &10), ("did2", &20), ("did3", &30), ("did4", &40)],
+    )?;
+
+    let json_array: String = row.get(0)?;
+    println!("{json_array}");
+
     Ok(())
 }

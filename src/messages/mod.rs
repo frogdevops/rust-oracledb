@@ -137,17 +137,6 @@ pub(crate) trait Message {
         Ok(())
     }
 
-    /// Deserializes a TTC status message.
-    fn deserialize_status(
-        &mut self,
-        _client: &Client,
-        resp: &mut Response,
-    ) -> Result<(), Error> {
-        let _call_status = resp.read_ub4()?;
-        let _seq_num = resp.read_ub2()?;
-        Ok(())
-    }
-
     /// Deserializes one TTC message after its type has already been read.
     fn deserialize_ttc_message(
         &mut self,
@@ -166,6 +155,7 @@ pub(crate) trait Message {
                 self.deserialize_describe_info(client, resp)
             }
             constants::TTC_MSG_TYPE_END_OF_RESPONSE => Ok(()),
+            constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS => Ok(()),
             constants::TTC_MSG_TYPE_ERROR => resp.read_error_info(client),
             constants::TTC_MSG_TYPE_IO_VECTOR => {
                 self.deserialize_io_vector(client, resp)
@@ -185,9 +175,7 @@ pub(crate) trait Message {
             constants::TTC_MSG_TYPE_SERVER_SIDE_PIGGYBACK => {
                 resp.deserialize_server_side_piggyback()
             }
-            constants::TTC_MSG_TYPE_STATUS => {
-                self.deserialize_status(client, resp)
-            }
+            constants::TTC_MSG_TYPE_STATUS => resp.deserialize_status(),
             constants::TTC_MSG_TYPE_WARNING => resp.deserialize_warning(),
             _ => Err(Error::unknown_ttc_message_type(message_type)),
         }

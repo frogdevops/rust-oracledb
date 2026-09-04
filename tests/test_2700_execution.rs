@@ -26,6 +26,8 @@
 // test_2700_execution()
 //-----------------------------------------------------------------------------
 
+use std::io::Read;
+
 mod common;
 
 use common::conn;
@@ -676,21 +678,72 @@ fn test_2720(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 }
 
 #[rstest]
-/// Tests ExecResult::returned_row() for exact single-row enforcement:
-/// - Succeeds when exactly 1 row is returned.
-/// - Returns NoDataFound when 0 rows are returned.
-/// - Returns OutOfRange when multiple rows are returned.
+/// Tests mixed regular and pending values across execute prefetch and fetch.
 fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let _guard = common::create_table(
         &conn,
         "test_2721",
+        "id number primary key, data1 blob, data2 blob",
+    )?;
+    let payloads = [
+        (vec![1, 2, 3], vec![4, 5, 6]),
+        (vec![7, 8, 9], vec![10, 11, 12]),
+        (vec![13, 14, 15], vec![16, 17, 18]),
+    ];
+    for (index, (payload1, payload2)) in payloads.iter().enumerate() {
+        let id = (index + 1) as i32;
+        conn.execute(
+            "insert into test_2721 values (:1, :2, :3)",
+            &[&id, payload1, payload2],
+        )?;
+    }
+    let mut statement = conn.statement(
+        r#"
+        select id, data1, id + 20, data2, cursor(select 99 from dual)
+        from test_2721
+        order by id
+        "#,
+    )?;
+    statement.prefetch_rows(1).fetch_array_size(1).fetch_lobs();
+    let cursor = statement.query(&[])?;
+    for (index, row) in cursor.enumerate() {
+        let mut row = row?;
+        let id = (index + 1) as i32;
+        assert_eq!(row.get::<i32>(0)?, id);
+        assert_eq!(row.get::<i32>(2)?, id + 20);
+        let mut lob1: oracledb::Lob = row.take(1)?;
+        let mut lob2: oracledb::Lob = row.take(3)?;
+        let nested_cursor: oracledb::Cursor = row.take(4)?;
+        let mut data1 = Vec::new();
+        let mut data2 = Vec::new();
+        lob1.read_to_end(&mut data1)?;
+        lob2.read_to_end(&mut data2)?;
+        assert_eq!(data1, payloads[index].0);
+        assert_eq!(data2, payloads[index].1);
+        let values: Vec<i32> = nested_cursor
+            .map(|row| row?.get(0))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(values, vec![99]);
+    }
+    Ok(())
+}
+
+#[rstest]
+/// Tests ExecResult::returned_row() for exact single-row enforcement:
+/// - Succeeds when exactly 1 row is returned.
+/// - Returns NoDataFound when 0 rows are returned.
+/// - Returns OutOfRange when multiple rows are returned.
+fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2722",
         "id number primary key, value varchar2(30)",
     )?;
 
     // 1. Insert 3 rows
     for i in 1..=3 {
         conn.execute(
-            "insert into test_2721 (id, value) values (:1, :2)",
+            "insert into test_2722 (id, value) values (:1, :2)",
             &[&i, &format!("value_{}", i)],
         )?;
     }
@@ -700,7 +753,7 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let out_id = 0i64;
     let out_value = " ".repeat(30);
     let mut result = conn.execute_named(
-        "update test_2721 set value = 'single_update' where id = 1 \
+        "update test_2722 set value = 'single_update' where id = 1 \
          returning id, value into :out_id, :out_value",
         &[
             ("out_id", &out_id),
@@ -713,7 +766,7 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 
     // Case B: 0 rows affected -> Err(NoDataFound)
     let mut result_empty = conn.execute_named(
-        "update test_2721 set value = 'no_match' where id = 9999 \
+        "update test_2722 set value = 'no_match' where id = 9999 \
          returning id, value into :out_id, :out_value",
         &[
             ("out_id", &out_id),
@@ -727,7 +780,7 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 
     // Case C: Multiple rows affected (2 rows: id=2, id=3) -> Err(OutOfRange)
     let mut result_multi = conn.execute_named(
-        "update test_2721 set value = 'multi_update' where id > 1 \
+        "update test_2722 set value = 'multi_update' where id > 1 \
          returning id, value into :out_id, :out_value",
         &[
             ("out_id", &out_id),
@@ -752,7 +805,7 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 /// - Succeeds when exactly 1 row is returned.
 /// - Returns NoDataFound when 0 rows are returned.
 /// - Returns OutOfRange when multiple rows are returned.
-fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+fn test_2723(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     // 1. Exactly 1 row -> Ok(Row)
     let row = conn.query_row("select 42 from dual", &[])?;
     assert_eq!(row.get::<i64>(0)?, 42);
@@ -798,3 +851,22 @@ fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     Ok(())
 }
 
+#[rstest]
+/// Tests that DML RETURNING into an out bind properly reports an error
+/// and does not hang on socket read when a statement constraint fails.
+fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2724",
+        "id number primary key, val number check (val > 0)",
+    )?;
+
+    let out_id: i64 = 0;
+    let res = conn.execute_named(
+        "insert into test_2724 (id, val) values (1, -1) returning id into :out_id",
+        &[("out_id", &out_id)],
+    );
+
+    assert!(res.is_err());
+    Ok(())
+}

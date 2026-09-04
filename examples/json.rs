@@ -23,34 +23,59 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// json.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows how to bind and fetch JSON values.
 //-----------------------------------------------------------------------------
 
-use arrow_array::{Array, StringArray};
+use std::collections::HashMap;
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    // native JSON columns require Oracle Database 21 or later.
+    let version = connection.version()?;
+    if version.0 < 21 {
+        println!("JSON columns require Oracle Database 21 or later.");
+        return Ok(());
+    }
+
+    // Create a table with a native JSON column.
+    let _guard = common::create_table(
+        &connection,
+        "rso_examples_json",
+        "id number primary key, data json",
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
-    }
+    // Bind a JSON value from Rust and insert it into the JSON column.
+    let mut obj = HashMap::new();
+
+    obj.insert(
+        "department_name".to_string(),
+        oracledb::JsonValue::String("Sales".to_string()),
+    );
+
+    let json = oracledb::JsonValue::JsonObject(obj);
+    let id = 1;
+
+    connection.execute(
+        "insert into rso_examples_json (id, data) values (:1, :2)",
+        &[&id, &json],
+    )?;
+
+    connection.commit()?;
+
+    // fetch a JSON column directly into an oracledb::JsonValue.
+    let row = connection.query_row(
+        "select data from rso_examples_json where id = :1",
+        &[&id],
+    )?;
+
+    let data: oracledb::JsonValue = row.get(0)?;
+    println!("{data:#?}");
+
     Ok(())
 }

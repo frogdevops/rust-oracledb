@@ -23,34 +23,45 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// plsql_procedure.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows how to call a PL/SQL procedure.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    let _guard = common::create_table(
+        &connection,
+        "rso_examples_messasges",
+        "message varchar2(100)",
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
-    }
+    connection.execute(
+        r#"
+        create or replace procedure rso_examples_add_message (
+            p_message varchar2
+        ) as
+        begin
+            insert into rso_examples_messasges (message) values (p_message);
+        end;
+        "#,
+        &[],
+    )?;
+
+    connection.execute(
+        "begin rso_examples_add_message(:1); end;",
+        &[&"Hello from PL/SQL"],
+    )?;
+    connection.commit()?;
+
+    let row = connection
+        .query_row("select message from rso_examples_messasges", &[])?;
+    let message: String = row.get(0)?;
+    println!("{message}");
+
     Ok(())
 }

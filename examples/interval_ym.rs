@@ -23,34 +23,40 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// interval_ym.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows inserting and querying INTERVAL YEAR TO MONTH columns.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    let _guard = common::create_table(
+        &connection,
+        "rso_examples_interval_ym",
+        "value INTERVAL YEAR TO MONTH",
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
-    }
+    // Create an INTERVAL YEAR TO MONTH value
+    let interval_value = oracledb::OracleIntervalYM::new(2, 3);
+
+    connection.execute(
+        "insert into rso_examples_interval_ym (value) values (:1)",
+        &[&interval_value],
+    )?;
+
+    connection.commit()?;
+
+    let row = connection
+        .query_row("select value from rso_examples_interval_ym", &[])?;
+
+    let value: oracledb::OracleIntervalYM = row.get(0)?;
+
+    // Print interval fields
+    println!("{value:?}");
+
     Ok(())
 }

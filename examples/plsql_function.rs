@@ -23,34 +23,37 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// simple_arrow_query.rs
+// plsql_function.rs
 //
-// Shows a simple example using the optional Arrow framework.
-// Run as `cargo run --example simple_arrow_query --features arrow [--release]`
+// Shows how to call a PL/SQL function and get its return value.
 //-----------------------------------------------------------------------------
-
-use arrow_array::{Array, StringArray};
 
 mod common;
 
 fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
-    let conn = oracledb::connect(config)?;
+    let connection = oracledb::connect(config)?;
 
-    // perform simple query that returns an Arrow RecordBatch
-    let rb = conn.query_arrow(
-        "select user from dual",
-        oracledb::BindParameters::default(),
+    connection.execute(
+        r#"
+        create or replace function rso_examples_func (
+            a_NumVal number
+        ) return number as
+        begin
+            return a_NumVal * 2;
+        end;
+        "#,
+        &[],
     )?;
 
-    // access a single Arrow column
-    let users = rb
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("Failed to downcast to StringArray");
-    for user in users.iter() {
-        println!("User = {}", user.unwrap_or("NULL"));
-    }
+    let mut result = connection
+        .execute("begin :1 := rso_examples_func(:2); end;", &[&0, &19])?;
+
+    let returned_data = result.returned_data()?;
+
+    let return_val: i32 = returned_data[0].get(0)?;
+
+    println!("Return value: {return_val}");
+
     Ok(())
 }
