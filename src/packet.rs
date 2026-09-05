@@ -48,6 +48,10 @@ impl Packet {
             true
         } else if let Some(last_byte) = self.buf.last() {
             *last_byte == constants::TTC_MSG_TYPE_END_OF_RESPONSE
+                || *last_byte == constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS
+                || *last_byte == constants::TTC_MSG_TYPE_ERROR
+                || self.buf.first() == Some(&constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS)
+                || self.buf.first() == Some(&constants::TTC_MSG_TYPE_ERROR)
         } else {
             false
         }

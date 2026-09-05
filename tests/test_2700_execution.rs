@@ -857,16 +857,20 @@ fn test_2723(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let _guard = common::create_table(
         &conn,
-        "test_2724",
+        "test_2724_dml_err",
         "id number primary key, val number check (val > 0)",
     )?;
 
     let out_id: i64 = 0;
     let res = conn.execute_named(
-        "insert into test_2724 (id, val) values (1, -1) returning id into :out_id",
+        "insert into test_2724_dml_err (id, val) values (1, -1) returning id into :out_id",
         &[("out_id", &out_id)],
     );
 
-    assert!(res.is_err());
+    let err = match res {
+        Err(e) => e,
+        Ok(_) => panic!("expected error but execution succeeded"),
+    };
+    assert!(err.to_string().contains("ORA-02290"));
     Ok(())
 }

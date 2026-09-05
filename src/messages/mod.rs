@@ -155,7 +155,10 @@ pub(crate) trait Message {
                 self.deserialize_describe_info(client, resp)
             }
             constants::TTC_MSG_TYPE_END_OF_RESPONSE => Ok(()),
-            constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS => Ok(()),
+            constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS => {
+                resp.flush_out_binds = true;
+                Ok(())
+            }
             constants::TTC_MSG_TYPE_ERROR => resp.read_error_info(client),
             constants::TTC_MSG_TYPE_IO_VECTOR => {
                 self.deserialize_io_vector(client, resp)
@@ -211,9 +214,12 @@ pub(crate) trait Message {
     ) -> bool {
         if client.supports_end_of_response() {
             message_type == constants::TTC_MSG_TYPE_END_OF_RESPONSE
+                || message_type == constants::TTC_MSG_TYPE_ERROR
+                || message_type == constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS
         } else {
             message_type == constants::TTC_MSG_TYPE_ERROR
                 || message_type == constants::TTC_MSG_TYPE_STATUS
+                || message_type == constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS
         }
     }
 

@@ -63,6 +63,7 @@ pub(crate) struct Response {
     num_columns: usize,
     call_status: u32,
     end_of_fetch: bool,
+    pub(crate) flush_out_binds: bool,
 }
 
 impl Response {
@@ -376,6 +377,7 @@ impl Response {
             num_columns: 0,
             call_status: 0,
             end_of_fetch: false,
+            flush_out_binds: false,
         }
     }
 

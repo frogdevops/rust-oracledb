@@ -198,6 +198,31 @@ impl Client {
             }
             return Err(e);
         }
+        if response.flush_out_binds {
+            response.flush_out_binds = false;
+            self.transport.send_packets(
+                constants::PACKET_TYPE_DATA,
+                0,
+                0,
+                &[constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS],
+            )?;
+            let new_packets = self.receive_packets()?;
+            let mut new_resp = Response::new();
+            new_resp.add_packets(new_packets);
+            while let Err(e) = message.deserialize(self, &mut new_resp) {
+                if e.is_out_of_data() {
+                    new_resp.add_packets(self.receive_packets()?);
+                    continue;
+                }
+                return Err(e);
+            }
+            message.post_deserialize(self, &mut new_resp)?;
+            self.process_call_status(new_resp.call_status());
+            if let Some(warning) = new_resp.take_warning() {
+                self.last_warning = Some(warning);
+            }
+            return Ok(());
+        }
         message.post_deserialize(self, response)?;
         self.process_call_status(response.call_status());
         if let Some(warning) = response.take_warning() {
