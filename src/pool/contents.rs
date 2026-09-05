@@ -60,18 +60,30 @@ pub(crate) type PoolContentsRef =
 
 impl PoolContents {
     /// Returns a boolean indicating if the pool can grow.
-    fn can_pool_grow(&mut self) -> bool {
-        let num_in_pool = self.open_count();
-        let min_connections = self.config.min_connections();
-        self.num_being_created = if num_in_pool < min_connections {
-            min_connections - num_in_pool
-        } else {
-            let max_connections = self.config.max_connections();
-            let increment = self.config.connection_increment();
-            (max_connections - num_in_pool).min(increment)
-        };
-        self.num_being_created > 0
+    fn can_pool_grow(&self) -> bool {
+        let total_active = self.open_count() + self.num_being_created;
+	    total_active < self.config.max_connections()
     }
+
+	fn grow_batch_size (&self) -> usize {
+		let total_conn = self.open_count() + self.num_being_created;
+		let min_connections = self.config.min_connections();
+		if total_conn < min_connections {
+			min_connections - total_conn
+		} else {
+			let max_conn = self.config.max_connections();
+			let increment = self.config.connection_increment();
+			(max_conn - total_conn).min(increment)
+		}
+	}
+
+	fn grow_pool (&mut self) {
+		let count = self.grow_batch_size();
+		self.num_being_created += count;
+		for _ in 0..count {
+			self.send_manager_request(PoolManagerRequest::GrowPool);
+		}
+	}
 
     /// Gets a connection from the pool that is capable of being returned
     /// immediately to the caller. This checks the connection to ensure that it
@@ -106,7 +118,7 @@ impl PoolContents {
                 conn_impl,
             ));
         } else if self.num_being_created == 0 && self.can_pool_grow() {
-            self.send_manager_request(PoolManagerRequest::GrowPool);
+            self.grow_pool();
         } else if let Some(conn_impl) = self.connections_requiring_drop.pop() {
             self.send_manager_request(PoolManagerRequest::DropConnection(
                 conn_impl,
@@ -218,7 +230,7 @@ impl PoolContents {
     ) -> Self {
         let min_connections = config.min_connections();
         let max_connections = config.max_connections();
-        if min_connections > 0 {
+        for _ in 0..min_connections {
             request_channel.send(PoolManagerRequest::GrowPool).unwrap();
         }
         Self {
