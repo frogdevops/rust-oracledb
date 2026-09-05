@@ -133,7 +133,7 @@ pub(crate) trait Message {
         let _num_iters = resp.read_ub4()?;
         let _buffer_len = resp.read_ub2()?;
         resp.read_bit_vector()?;
-        let _rxhrid = resp.read_bytes_with_length()?;
+        let _rxhrid = resp.read_bytes_with_double_length()?;
         Ok(())
     }
 
@@ -177,7 +177,7 @@ pub(crate) trait Message {
             }
             constants::TTC_MSG_TYPE_STATUS => resp.deserialize_status(),
             constants::TTC_MSG_TYPE_WARNING => resp.deserialize_warning(),
-            _ => Err(Error::unknown_ttc_message_type(message_type)),
+            _ => Err(resp.unknown_ttc_message_type(message_type)),
         }
     }
 

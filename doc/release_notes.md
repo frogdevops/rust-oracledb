@@ -20,17 +20,25 @@
 1.  Added support for binding long values in any order
     ([issue 10](https://github.com/oracle/rust-oracledb/issues/10)).
 1.  Added support for the HA readiness requirements of Oracle Database 23.26.3.
+1.  Errors that are returned now capture the backtrace and display it if
+    configured with `RUST_BACKTRACE=1`, which aids in debugging.
+1.  Improved errors that are a result of a failure to parse the server's
+    response to a request.
 1.  Fixed bug where returning a connection to the pool did not end the request
     correctly
     ([issue 15](https://github.com/oracle/rust-oracledb/issues/15)).
 1.  Removed the ability to clone [Cursor](crate::Cursor) and [Lob](crate::Lob).
 1.  Fixed bug which caused a named binding containing a single quote to panic.
 1.  Fixed bug which caused a hang when executing a statement with PL/SQL out
-    binds multiple times.
+    binds multiple times
+    ([issue 17](https://github.com/oracle/rust-oracledb/issues/17)).
+1.  Fixed bug which caused a protocol error when parsing the response to a
+    `SELECT FOR UPDATE` statement.
 1.  Fixed bug which permitted a pool to be created with the maximum number of
     connections set to zero.  The error
     [ErrorKind::PoolMaxInvalid](crate::ErrorKind::PoolMaxInvalid) was renamed
     from `ErrorKind::PoolMaxLessThanMin` which now covers both scenarios.
+1.  Fixed bug binding Arrow arrays of type `StringView` and `BinaryView`.
 
 
 ## rust-oracledb 26.0.0-beta.2 (August 20, 2026)

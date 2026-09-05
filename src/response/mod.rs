@@ -50,8 +50,7 @@ use crate::statement::CachedStatement;
 use error_info::ErrorInfo;
 
 pub(crate) struct Response {
-    packet_type: u8,
-    packet_flags: u8,
+    packets: Vec<Packet>,
     buf: ReadBuffer,
     error_info: Option<ErrorInfo>,
     edition: Option<String>,
@@ -67,6 +66,27 @@ pub(crate) struct Response {
 }
 
 impl Response {
+    /// Adds packets to the response in preparation for an attempt at
+    /// deserializing the database response. Prior to Oracle Database 26ai, the
+    /// database does not give any indication of when the end of a response has
+    /// been reached. The only way to know is by attempting to parse the
+    /// response, and if during that attempt, the end of data is reached, more
+    /// packets are clearly required for that response. Since the response
+    /// contains state, that state must be reset so that it doesn't interfere
+    /// with another attempt at deserializing the response.
+    pub(crate) fn add_packets(&mut self, packets: Vec<Packet>) {
+        self.packets.extend(packets);
+        self.buf = ReadBuffer::from_packets(&self.packets);
+        self.error_info = None;
+        self.edition = None;
+        self.current_schema = None;
+        self.warning = None;
+        self.rows = None;
+        self.pending_values.clear();
+        self.bit_vector = None;
+        self.end_of_fetch = false;
+    }
+
     /// Records one pending value position while deserializing rows.
     pub(crate) fn add_pending_db_value(
         &mut self,
@@ -116,6 +136,21 @@ impl Response {
                 client.return_statement(&statement);
             }
         }
+    }
+
+    /// Returns the current location in the response.
+    pub(crate) fn current_location(&self) -> ResponseLocation {
+        let mut packet_num = 1;
+        let mut offset = self.buf.get_pos();
+        for packet in &self.packets {
+            if offset <= packet.buf.len() {
+                offset += packet.header_size();
+                break;
+            }
+            packet_num += 1;
+            offset -= packet.buf.len();
+        }
+        ResponseLocation { packet_num, offset }
     }
 
     pub(crate) fn deserialize_bit_vector(&mut self) -> Result<(), Error> {
@@ -293,12 +328,14 @@ impl Response {
         }
     }
 
+    /// Returns the packet flags of the first packet of the response.
     pub(crate) fn get_packet_flags(&self) -> u8 {
-        self.packet_flags
+        self.packets.first().unwrap().packet_flags
     }
 
+    /// Returns the packet type of the first packet of the response.
     pub(crate) fn get_packet_type(&self) -> u8 {
-        self.packet_type
+        self.packets.first().unwrap().packet_type
     }
 
     /// Returns the rowcount returned by the database.
@@ -326,8 +363,7 @@ impl Response {
 
     pub(crate) fn new() -> Response {
         Response {
-            packet_type: 0,
-            packet_flags: 0,
+            packets: Vec::new(),
             buf: ReadBuffer::from_packets(&[]),
             error_info: None,
             edition: None,
@@ -499,29 +535,6 @@ impl Response {
         self.buf.read_utf8_with_length()
     }
 
-    /// Resets the buffer in preparation for another attempt at deserializing
-    /// the database response. Prior to Oracle Database 26ai, the database does
-    /// not give any indication of when the end of a response has been reached.
-    /// The only way to know is by attempting to parse the response, and if
-    /// during that attempt, the end of data is reached, more packets are
-    /// clearly required for that response. Since the response contains state,
-    /// that state must be reset so that it doesn't interfere with another
-    /// attempt at deserializing the response.
-    pub(crate) fn reset(&mut self, packets: &[Packet]) {
-        let packet = packets.first().unwrap();
-        self.packet_type = packet.packet_type;
-        self.packet_flags = packet.packet_flags;
-        self.buf = ReadBuffer::from_packets(packets);
-        self.error_info = None;
-        self.edition = None;
-        self.current_schema = None;
-        self.warning = None;
-        self.rows = None;
-        self.pending_values.clear();
-        self.bit_vector = None;
-        self.end_of_fetch = false;
-    }
-
     pub(crate) fn set_prev_fetch_last_row(&mut self, last_row: Option<DbRow>) {
         self.prev_fetch_last_row = last_row;
     }
@@ -554,5 +567,24 @@ impl Response {
         if let Some(error_info) = self.error_info.as_mut() {
             error_info.rowcount += other_resp.get_rowcount();
         }
+    }
+
+    /// Returns an error indicating that an unknown TTC message type was
+    /// encountered. It first calculates the packet number and offset into the
+    /// packet to aid in debugging.
+    pub(crate) fn unknown_ttc_message_type(&self, message_type: u8) -> Error {
+        Error::unknown_ttc_message_type(message_type, self.current_location())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ResponseLocation {
+    packet_num: usize,
+    offset: usize,
+}
+
+impl std::fmt::Display for ResponseLocation {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "packet {}, offset {}", self.packet_num, self.offset)
     }
 }
