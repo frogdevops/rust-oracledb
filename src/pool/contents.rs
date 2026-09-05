@@ -131,9 +131,12 @@ impl PoolContents {
     /// connection is added to the list of free connections.
     fn satisfy_request(&mut self, conn_impl_result: Result<ConnImpl, Error>) {
         if let Some(sender) = self.pending_requests.pop_front() {
+	        let is_ok = conn_impl_result.is_ok();
             match sender.send(conn_impl_result) {
                 Ok(_) => {
-                    self.num_busy += 1;
+	                if is_ok {
+		                self.num_busy += 1;
+	                }
                 }
                 Err(e) => {
                     self.satisfy_request(e.0);
