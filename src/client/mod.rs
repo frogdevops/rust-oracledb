@@ -85,7 +85,7 @@ pub struct Client {
     pending_module: Option<Vec<u8>>,
     pending_ha_readiness: bool,
     pending_session_state: u8,
-    transaction_in_progress: bool,
+    pub(crate) transaction_in_progress: bool,
     pool_id: String,
     last_warning: Option<String>,
     security_context: Option<EndUserSecurityContext>,
@@ -221,6 +221,7 @@ impl Client {
             if let Some(warning) = new_resp.take_warning() {
                 self.last_warning = Some(warning);
             }
+	        *response = new_resp;
             return Ok(());
         }
         message.post_deserialize(self, response)?;
@@ -677,8 +678,9 @@ impl Client {
                     constants::TTC_SESSION_STATE_REQUEST_END;
             }
         }
-        if self.in_request || self.transaction_in_progress {
+        if self.transaction_in_progress {
             self.process_message(&mut RollbackMessage::new())?;
+	        self.transaction_in_progress = false;
         }
         Ok(())
     }

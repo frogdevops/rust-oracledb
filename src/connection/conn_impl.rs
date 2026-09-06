@@ -142,6 +142,7 @@ impl ConnImpl {
         let mut message = CommitMessage::new();
         let mut client = self.client_ref.lock().unwrap();
         client.process_message(&mut message)?;
+	    client.transaction_in_progress = false;
         Ok(())
     }
 
@@ -294,6 +295,7 @@ impl ConnImpl {
         let mut message = RollbackMessage::new();
         let mut client = self.client_ref.lock().unwrap();
         client.process_message(&mut message)?;
+	    client.transaction_in_progress = false;
         Ok(())
     }
 
