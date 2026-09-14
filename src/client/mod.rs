@@ -694,6 +694,7 @@ impl Client {
     pub(crate) fn end_request(&mut self) -> Result<(), Error> {
         self.security_context = None;
         self.last_warning = None;
+        self.transport.set_read_timeout(None)?;
         if self.in_request {
             if self.pending_session_state != 0 {
                 self.in_request = false;

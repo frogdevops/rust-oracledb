@@ -26,6 +26,8 @@
 // test_2900_pool()
 //-----------------------------------------------------------------------------
 
+use std::time::Duration;
+
 mod common;
 
 fn pool_config(
@@ -138,5 +140,29 @@ fn test_2904() -> Result<(), oracledb::Error> {
     pool.close()?;
 
     assert_eq!(count, 0, "pooled release leaked an open transaction");
+    Ok(())
+}
+
+#[test]
+/// Verifies the call timeout used for the internal pool ping is cleared before
+/// the connection is returned to the caller and that any value set on an
+/// acquired connection is cleared before returned to a subsequent caller.
+fn test_2905() -> Result<(), oracledb::Error> {
+    let config = pool_config(0, 1, 1)?
+        .set_ping_interval(Some(Duration::ZERO))
+        .set_ping_timeout(Duration::from_secs(2));
+    let mut pool = oracledb::create_pool(config)?;
+    let mut first = pool.acquire()?;
+    let first_session_id = first.session_id()?;
+    first.set_call_timeout(Some(Duration::from_millis(375)))?;
+    first.close()?;
+
+    let mut second = pool.acquire()?;
+    assert_eq!(second.session_id()?, first_session_id);
+    let call_timeout = second.call_timeout()?;
+    second.close()?;
+    pool.close()?;
+
+    assert_eq!(call_timeout, None);
     Ok(())
 }

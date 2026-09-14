@@ -12,6 +12,8 @@
     and the enumeration [VectorStorageFormat](crate::VectorStorageFormat).
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
+1.  Ensure that connections returned from a pool always start with a call
+    timeout of None.
 
 
 ## rust-oracledb 26.0.0-beta.3 (September 8, 2026)
