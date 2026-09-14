@@ -47,8 +47,8 @@ impl TableGuard<'_> {
         let sql = format!("drop table {} purge", self.table_name);
         let result = self.conn.execute(&sql, &[]);
         if let Err(err) = result
-            && let oracledb::ErrorKind::DbError(message) = err.kind()
-            && !message.starts_with("ORA-00942:")
+            && let oracledb::ErrorKind::DbError(db_error) = err.kind()
+            && db_error.code() != 942
         {
             return Err(err);
         }

@@ -132,8 +132,7 @@ fn test_1904(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     };
     assert!(matches!(
         error.kind(),
-        oracledb::ErrorKind::DbError(message)
-            if message.starts_with("ORA-01410:")
+        oracledb::ErrorKind::DbError(db_error) if db_error.code() == 1410
     ));
     Ok(())
 }

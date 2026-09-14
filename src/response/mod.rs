@@ -47,6 +47,7 @@ use crate::read_buffer::ReadBuffer;
 use crate::row::DbRow;
 use crate::statement::CachedStatement;
 
+pub use error_info::DbError;
 use error_info::ErrorInfo;
 
 pub(crate) struct Response {
@@ -67,6 +68,12 @@ pub(crate) struct Response {
 }
 
 impl Response {
+    /// Takes database error information associated with the response and
+    /// transfers ownership of it to the caller.
+    fn take_db_error(&mut self) -> Option<DbError> {
+        self.error_info.as_mut().and_then(|i| i.take_db_error())
+    }
+
     /// Adds packets to the response in preparation for an attempt at
     /// deserializing the database response. Prior to Oracle Database 26ai, the
     /// database does not give any indication of when the end of a response has
@@ -107,28 +114,31 @@ impl Response {
         self.call_status
     }
 
+    /// Checks to see if any error has taken place and if so, returns it. The
+    /// error "no data found" when found for a query is ignored and the end of
+    /// fetch marker is set instead.
     pub(crate) fn check_for_end_of_fetch(
         &mut self,
         statement: &CachedStatement,
     ) -> Result<(), Error> {
-        if self.get_error_num() == constants::DB_ERR_NUM_NO_DATA_FOUND
-            && statement.is_query()
-        {
-            self.end_of_fetch = true;
-            Ok(())
+        if let Some(db_error) = self.take_db_error() {
+            if statement.is_query()
+                && db_error.code() == constants::DB_ERR_NUM_NO_DATA_FOUND
+            {
+                self.end_of_fetch = true;
+                Ok(())
+            } else {
+                Err(Error::db_error(db_error.clone()))
+            }
         } else {
-            self.check_for_error()
+            Ok(())
         }
     }
 
+    /// Checks to see if any error has taken place and, if so, returns it.
     pub(crate) fn check_for_error(&mut self) -> Result<(), Error> {
-        if let Some(error_info) = self.error_info.as_ref() {
-            let message = error_info.error_message();
-            if !message.is_empty() {
-                return Err(Error::db_error(message.to_string()));
-            }
-        }
-        Ok(())
+        self.take_db_error()
+            .map_or(Ok(()), |e| Err(Error::db_error(e)))
     }
 
     /// Queues resources created before response deserialization failed.
@@ -312,20 +322,9 @@ impl Response {
         }
     }
 
+    /// Returns the cursor id returned by the error response.
     pub(crate) fn get_cursor_id(&self) -> u16 {
-        if let Some(error_info) = self.error_info.as_ref() {
-            error_info.cursor_id()
-        } else {
-            0
-        }
-    }
-
-    pub(crate) fn get_error_num(&self) -> usize {
-        if let Some(error_info) = self.error_info.as_ref() {
-            error_info.num
-        } else {
-            0
-        }
+        self.error_info.as_ref().map(|i| i.cursor_id()).unwrap_or(0)
     }
 
     /// Returns whether or not the response requires out binds to be flushed.
@@ -333,6 +332,7 @@ impl Response {
         self.flush_out_binds
     }
 
+    /// Returns the last row that was fetched.
     pub(crate) fn get_last_row_fetched(&self) -> &DbRow {
         if let Some(rows) = self.rows.as_ref() {
             rows.last().unwrap()
@@ -353,11 +353,7 @@ impl Response {
 
     /// Returns the rowcount returned by the database.
     pub(crate) fn get_rowcount(&self) -> u64 {
-        if let Some(error_info) = self.error_info.as_ref() {
-            error_info.rowcount()
-        } else {
-            0
-        }
+        self.error_info.as_ref().map(|i| i.rowcount()).unwrap_or(0)
     }
 
     pub(crate) fn is_duplicate_data(&self, column_num: usize) -> bool {
@@ -586,8 +582,10 @@ impl Response {
             other_rows.append(&mut final_rows);
             self.rows = Some(other_rows);
         }
-        if let Some(error_info) = self.error_info.as_mut() {
-            error_info.rowcount += other_resp.get_rowcount();
+        if let Some(error_info) = self.error_info.as_mut()
+            && let Some(other_error_info) = other_resp.error_info.as_mut()
+        {
+            error_info.transfer_into(other_error_info);
         }
     }
 

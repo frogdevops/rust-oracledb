@@ -695,8 +695,7 @@ fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     };
     assert!(matches!(
         error.kind(),
-        oracledb::ErrorKind::DbError(message)
-            if message.starts_with("ORA-00001:")
+        oracledb::ErrorKind::DbError(db_error) if db_error.code() == 1
     ));
 
     statement.execute(&[&2, &"after-error"])?;
