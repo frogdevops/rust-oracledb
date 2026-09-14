@@ -119,3 +119,21 @@ fn test_1903(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert!(!returned_row.get::<&str>(0)?.is_empty());
     Ok(())
 }
+
+#[rstest]
+/// Verifies an invalid ROWID is surfaced as ORA-01410 rather than a panic.
+fn test_1904(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let error = match conn.query_row(
+        "select chartorowid(:1) from dual",
+        &[&"not-an-oracle-rowid"],
+    ) {
+        Ok(_) => panic!("an invalid ROWID must be rejected"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error.kind(),
+        oracledb::ErrorKind::DbError(message)
+            if message.starts_with("ORA-01410:")
+    ));
+    Ok(())
+}

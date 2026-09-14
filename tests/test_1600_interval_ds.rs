@@ -96,3 +96,14 @@ fn test_1603(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     );
     Ok(())
 }
+
+#[test]
+/// Verifies interval day-to-second components and display behavior without a
+/// database connection.
+fn test_1604() {
+    let interval = oracledb::OracleIntervalDS::new(-2, -3, -4, -5, -6);
+    assert_eq!((interval.days(), interval.hours()), (-2, -3));
+    assert_eq!((interval.minutes(), interval.seconds()), (-4, -5));
+    assert_eq!(interval.nanoseconds(), -6);
+    assert_eq!(interval.to_string(), "P-2DT-3H-4M-5.-00000006S");
+}

@@ -412,3 +412,33 @@ fn test_2421(mut conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert!(lob.write_all(b"closed connection").is_err());
     Ok(())
 }
+
+#[rstest]
+/// Verifies BLOB streaming across multiple database chunks and an append.
+fn test_2422(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(&conn, "test_2422", "data blob")?;
+    conn.execute("insert into test_2422 values (empty_blob())", &[])?;
+
+    let mut row = conn
+        .statement("select data from test_2422 for update")?
+        .fetch_lobs()
+        .query_row(&[])?;
+    let mut lob: oracledb::Lob = row.take(0)?;
+    let chunk_size = lob.get_chunk_size()?;
+    let mut expected = Vec::with_capacity(chunk_size * 2 + 31);
+    for index in 0..(chunk_size * 2 + 17) {
+        expected.push((index % 251) as u8);
+    }
+    for chunk in expected.chunks((chunk_size / 3).max(1)) {
+        lob.write_all(chunk)?;
+    }
+    let suffix = b"-append-2422";
+    lob.write_all(suffix)?;
+    expected.extend_from_slice(suffix);
+    assert_eq!(lob.get_size()?, expected.len());
+    drop(lob);
+
+    let row = conn.query_row("select data from test_2422", &[])?;
+    assert_eq!(row.get::<Vec<u8>>(0)?, expected);
+    Ok(())
+}

@@ -260,3 +260,40 @@ fn test_2608(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(values, vec![1, 2, 3]);
     Ok(())
 }
+
+#[test]
+/// Verifies exported database type descriptors classify their value families
+/// consistently.
+fn test_2609() {
+    for db_type in [
+        &oracledb::DB_TYPE_RAW,
+        &oracledb::DB_TYPE_LONG_RAW,
+        &oracledb::DB_TYPE_BLOB,
+    ] {
+        assert!(db_type.is_binary_type(), "{}", db_type.name());
+        assert!(!db_type.is_date_type(), "{}", db_type.name());
+    }
+    for db_type in [
+        &oracledb::DB_TYPE_DATE,
+        &oracledb::DB_TYPE_TIMESTAMP,
+        &oracledb::DB_TYPE_TIMESTAMP_LTZ,
+        &oracledb::DB_TYPE_TIMESTAMP_TZ,
+    ] {
+        assert!(db_type.is_date_type(), "{}", db_type.name());
+        assert!(!db_type.is_binary_type(), "{}", db_type.name());
+    }
+    for db_type in [
+        &oracledb::DB_TYPE_CHAR,
+        &oracledb::DB_TYPE_NCHAR,
+        &oracledb::DB_TYPE_VARCHAR,
+        &oracledb::DB_TYPE_NVARCHAR,
+        &oracledb::DB_TYPE_LONG,
+        &oracledb::DB_TYPE_LONG_NVARCHAR,
+        &oracledb::DB_TYPE_ROWID,
+        &oracledb::DB_TYPE_UROWID,
+        &oracledb::DB_TYPE_CLOB,
+        &oracledb::DB_TYPE_NCLOB,
+    ] {
+        assert!(db_type.is_string_type(), "{}", db_type.name());
+    }
+}

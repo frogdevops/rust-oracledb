@@ -254,3 +254,25 @@ fn test_1011(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert!(values[2].is_none());
     Ok(())
 }
+
+#[rstest]
+/// Verifies supplementary Unicode survives VARCHAR2, NVARCHAR2, CLOB and
+/// NCLOB bind/fetch paths.
+fn test_1012(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let value = "Rust 🦀 東京 e\u{301}";
+    let row = conn.query_row(
+        r#"
+        select
+            cast(:1 as varchar2(100 char)),
+            cast(:2 as nvarchar2(100)),
+            to_clob(:3),
+            to_nclob(:4)
+        from dual
+        "#,
+        &[&value, &value, &value, &value],
+    )?;
+    for index in 0..4 {
+        assert_eq!(row.get::<String>(index)?, value);
+    }
+    Ok(())
+}

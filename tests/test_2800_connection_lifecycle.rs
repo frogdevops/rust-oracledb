@@ -53,3 +53,10 @@ fn test_2800(mut conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     }
     Ok(())
 }
+
+#[test]
+/// Verifies Oracle database version display behavior without a connection.
+fn test_2801() {
+    let version = oracledb::OracleVersion(26, 1, 2, 3, 4);
+    assert_eq!(version.to_string(), "26.1.2.3.4");
+}

@@ -676,3 +676,32 @@ fn test_2723(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(ids, vec![vec![1], vec![1, 2], vec![1, 2, 3]]);
     Ok(())
 }
+
+#[rstest]
+/// Verifies the same cached statement can be reused after a database error.
+fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2724",
+        "id number primary key, value varchar2(30)",
+    )?;
+    let statement = conn.statement("insert into test_2724 values (:1, :2)")?;
+    statement.execute(&[&1, &"first"])?;
+    conn.commit()?;
+
+    let error = match statement.execute(&[&1, &"duplicate"]) {
+        Ok(_) => panic!("a duplicate primary key must be rejected"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error.kind(),
+        oracledb::ErrorKind::DbError(message)
+            if message.starts_with("ORA-00001:")
+    ));
+
+    statement.execute(&[&2, &"after-error"])?;
+    let row =
+        conn.query_row("select value from test_2724 where id = 2", &[])?;
+    assert_eq!(row.get::<String>(0)?, "after-error");
+    Ok(())
+}
