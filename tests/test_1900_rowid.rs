@@ -34,38 +34,27 @@ use rstest::*;
 #[rstest]
 /// test fetching ROWID
 fn test_1900(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let mut cursor =
-        conn.query("select cast(rowid as varchar2(18)) from dual", &[])?;
-    let mut rowid_as_string = String::new();
-    for row in cursor {
-        let row = row?;
-        rowid_as_string = row.get(0)?;
-    }
-    cursor = conn.query("select rowid from dual", &[])?;
-    for row in cursor {
-        let row = row?;
-        let fetched_val: String = row.get(0)?;
-        assert_eq!(fetched_val.to_string(), rowid_as_string);
-    }
+    let row =
+        conn.query_row("select cast(rowid as varchar2(18)) from dual", &[])?;
+    let rowid_as_string: String = row.get(0)?;
+    let row = conn.query_row("select rowid from dual", &[])?;
+    assert_eq!(row.get::<String>(0)?, rowid_as_string);
     Ok(())
 }
 
 #[rstest]
 /// test ROWID metadata and string representation
 fn test_1901(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let cursor = conn.query(
+    let row = conn.query_row(
         "select rowid as rid, cast(rowid as varchar2(20)) from dual",
         &[],
     )?;
-    let columns = cursor.columns();
+    let columns = row.columns();
     assert_eq!(columns[0].name(), "RID");
     assert_eq!(columns[0].db_type(), oracledb::DB_TYPE_ROWID);
-    for row in cursor {
-        let row = row?;
-        let fetched_val: String = row.get(0)?;
-        let str_val: String = row.get(1)?;
-        assert_eq!(fetched_val, str_val);
-    }
+    let fetched_val: String = row.get(0)?;
+    let str_val: String = row.get(1)?;
+    assert_eq!(fetched_val, str_val);
     Ok(())
 }
 

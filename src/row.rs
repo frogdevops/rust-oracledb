@@ -197,6 +197,11 @@ impl Row {
         }
     }
 
+    /// Returns column information for the row.
+    pub fn columns(&self) -> &Vec<Metadata> {
+        &self.column_info
+    }
+
     /// Returns the value at the given column index, converted to the requested
     /// type. If a reference type is supplied, a reference is provided to the
     /// internal data, if possible. If an owned type is supplied, a copy of

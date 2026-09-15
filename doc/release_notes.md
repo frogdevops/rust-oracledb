@@ -10,6 +10,8 @@
     [Metadata::vector_dimensions()](crate::Metadata::vector_dimensions()) and
     [Metadata::vector_dimensions()](crate::Metadata::vector_storage_format())
     and the enumeration [VectorStorageFormat](crate::VectorStorageFormat).
+1.  Added method [Row::columns()](crate::Row::columns()) to provide information
+    about the columns found in that particular row.
 1.  Added struct [DbError](crate::DbError) containing information about the
     database error which is now returned instead of `String` for
     the [ErrorKind::DbError](crate::ErrorKind::DbError) enum variant.
