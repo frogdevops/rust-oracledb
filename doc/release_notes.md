@@ -3,7 +3,7 @@
 ## rust-oracledb 26.0.0-beta.4 (TBD)
 
 1.  All of the database type constants have been made references in order to
-    avoid the necssity of taking a reference (or a double reference when
+    avoid the necessity of taking a reference (or a double reference when
     binding the type directly).
 1.  Added methods [Metadata::data_type()](crate::Metadata::data_type()),
     [Metadata::is_sparse_vector()](crate::Metadata::is_sparse_vector()),
