@@ -174,6 +174,15 @@ impl DbValue {
                     _ => Ok(Some(DbValue::Rowid(Rowid::deserialize(resp)?))),
                 }
             }
+            constants::ORA_TYPE_NUM_UROWID => {
+                if in_fetch {
+                    Ok(resp.deserialize_urowid()?.map(DbValue::String))
+                } else {
+                    Ok(Some(DbValue::String(
+                        resp.read_utf8_with_length()?.into(),
+                    )))
+                }
+            }
             constants::ORA_TYPE_NUM_JSON => {
                 Ok(resp.read_value_lob::<JsonValue>()?.map(DbValue::Json))
             }

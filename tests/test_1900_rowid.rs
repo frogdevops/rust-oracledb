@@ -125,3 +125,75 @@ fn test_1904(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     ));
     Ok(())
 }
+
+#[rstest]
+/// Tests null UROWID and UROWID wrapper of a physical rowid.
+fn test_1905(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let row = conn.query_row("select cast(null as urowid) from dual", &[])?;
+    assert_eq!(row.columns()[0].db_type(), oracledb::DB_TYPE_UROWID);
+    assert!(row.get::<Option<String>>(0)?.is_none());
+    let row = conn.query_row("select rowid from dual", &[])?;
+    let rowid: String = row.get(0)?;
+    let row = conn.query_row("select cast(rowid as urowid) from dual", &[])?;
+    assert_eq!(row.columns()[0].db_type(), oracledb::DB_TYPE_UROWID);
+    assert_eq!(row.get::<String>(0)?, rowid);
+    Ok(())
+}
+
+#[rstest]
+/// Tests fetching UROWID
+fn test_1906(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table_with_options(
+        &conn,
+        "test_1906",
+        r#"
+        int_val number(9) not null,
+        string_val varchar2(250) not null,
+        date_val date not null,
+        constraint test_1906_pk primary key (int_val, string_val, date_val)
+        "#,
+        "organization index",
+    )?;
+    let data = oracledb::BindParameters::Slice(&[
+        &[
+            &1,
+            &"String #1",
+            &oracledb::OracleTimestamp::new_date(2017, 4, 4),
+        ],
+        &[
+            &2,
+            &"String #2",
+            &oracledb::OracleTimestamp::new_date(2017, 4, 5),
+        ],
+        &[
+            &3,
+            &"3".repeat(249),
+            &oracledb::OracleTimestamp::new_date(2017, 4, 6),
+        ],
+        &[
+            &3,
+            &"4".repeat(250),
+            &oracledb::OracleTimestamp::new_date(2017, 4, 7),
+        ],
+    ]);
+    conn.execute_batch("insert into test_1906 values (:1, :2, :3)", data)?;
+    let cursor = conn.query(
+        r#"
+        select int_val, rowid
+        from test_1906
+        order by int_val
+        "#,
+        &[],
+    )?;
+    for row_result in cursor {
+        let row = row_result?;
+        let int_val: u8 = row.get(0)?;
+        let rowid: String = row.get(1)?;
+        let fetched_row = conn.query_row(
+            "select int_val from test_1906 where rowid = :1",
+            &[&rowid],
+        )?;
+        assert_eq!(fetched_row.get::<u8>(0)?, int_val);
+    }
+    Ok(())
+}

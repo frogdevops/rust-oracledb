@@ -15,6 +15,7 @@
 1.  Added struct [DbError](crate::DbError) containing information about the
     database error which is now returned instead of `String` for
     the [ErrorKind::DbError](crate::ErrorKind::DbError) enum variant.
+1.  Added support for fetching UROWID.
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
 1.  Ensure that connections returned from a pool always start with a call

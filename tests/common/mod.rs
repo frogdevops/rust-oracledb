@@ -35,8 +35,15 @@ pub struct TableGuard<'a> {
 
 impl TableGuard<'_> {
     /// Creates the table with the given definition.
-    fn create_table(&self, definition: &str) -> Result<(), oracledb::Error> {
-        let sql = format!("create table {} ({})", self.table_name, definition);
+    fn create_table(
+        &self,
+        definition: &str,
+        options: &str,
+    ) -> Result<(), oracledb::Error> {
+        let sql = format!(
+            "create table {} ({}) {}",
+            self.table_name, definition, options
+        );
         self.conn.execute(&sql, &[])?;
         Ok(())
     }
@@ -91,7 +98,21 @@ pub fn create_table<'a>(
 ) -> Result<TableGuard<'a>, oracledb::Error> {
     let guard = TableGuard { conn, table_name };
     guard.drop_table()?;
-    guard.create_table(definition)?;
+    guard.create_table(definition, "")?;
+    Ok(guard)
+}
+
+#[allow(dead_code)]
+/// Creates the table with the given name and definition and options.
+pub fn create_table_with_options<'a>(
+    conn: &'a oracledb::Connection,
+    table_name: &'a str,
+    definition: &str,
+    options: &str,
+) -> Result<TableGuard<'a>, oracledb::Error> {
+    let guard = TableGuard { conn, table_name };
+    guard.drop_table()?;
+    guard.create_table(definition, options)?;
     Ok(guard)
 }
 

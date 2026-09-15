@@ -45,6 +45,8 @@ use crate::read_buffer::FromBuf;
 use crate::read_buffer::FromBufFallible;
 use crate::read_buffer::ReadBuffer;
 use crate::row::DbRow;
+use crate::rowid::Rowid;
+use crate::rowid::convert_logical_rowid;
 use crate::statement::CachedStatement;
 
 pub use error_info::DbError;
@@ -283,6 +285,23 @@ impl Response {
         self.call_status = self.read_ub4()?;
         let _seq_num = self.read_ub2()?;
         Ok(())
+    }
+
+    /// Deserializes a universal rowid from the buffer.
+    pub(crate) fn deserialize_urowid(
+        &mut self,
+    ) -> Result<Option<String>, Error> {
+        if self.read_bytes_with_length()?.is_empty() {
+            Ok(None)
+        } else {
+            let mut buf =
+                ReadBuffer::from_bytes(&self.read_bytes_with_length()?);
+            if buf.read_u8()? == 1 {
+                Ok(Some(Rowid::from_buf(&mut buf)?.to_string()))
+            } else {
+                Ok(Some(convert_logical_rowid(buf.read_remaining_bytes())))
+            }
+        }
     }
 
     pub(crate) fn deserialize_warning(&mut self) -> Result<(), Error> {
