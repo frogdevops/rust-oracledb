@@ -251,6 +251,31 @@ impl AuthMessage {
         self.combo_key = Some(combo_key);
     }
 
+    /// Returns the alter session statement that is sent during the initial
+    /// connection to the database. This includes the directive to change the
+    /// session time zone to match the time zone in use by the system.
+    fn get_alter_session_statement(&self) -> String {
+        let tz_repr = if let Ok(value) = std::env::var("ORA_SDTZ")
+            && !value.is_empty()
+        {
+            match value.to_uppercase().as_str() {
+                "LOCAL" | "DBTIMEZONE" => value,
+                _ => crate::enquote_literal(&value),
+            }
+        } else {
+            let offset_seconds =
+                chrono::Local::now().offset().local_minus_utc();
+            let tz_hour = offset_seconds / 3600;
+            let tz_minute = (offset_seconds - (tz_hour * 3600)) / 60;
+            if tz_hour < 0 || tz_minute < 0 {
+                format!("'-{:02}:{:02}'", tz_hour.abs(), tz_minute.abs())
+            } else {
+                format!("'+{:02}:{:02}'", tz_hour, tz_minute)
+            }
+        };
+        format!("ALTER SESSION SET TIME_ZONE={}\0", tz_repr)
+    }
+
     /// Returns the authorization mode to use when performing authentication.
     fn get_auth_mode(&self, client: &Client) -> u32 {
         let mut auth_mode: u32 = 0;
@@ -492,6 +517,11 @@ impl Message for AuthMessage {
                 "SESSION_CLIENT_VERSION",
                 &full_version_num.to_string(),
                 0,
+            );
+            self.add_pair(
+                "AUTH_ALTER_SESSION",
+                &self.get_alter_session_statement(),
+                1,
             );
             if let Some(cclass) = client.config().cclass() {
                 self.add_pair("AUTH_KPPL_CONN_CLASS", cclass, 0);
