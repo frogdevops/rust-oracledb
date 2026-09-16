@@ -93,3 +93,12 @@ fn test_1703(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(negative, oracledb::OracleIntervalYM::new(-25, -11));
     Ok(())
 }
+
+#[test]
+/// Verifies interval year-to-month components and display behavior without a
+/// database connection.
+fn test_1704() {
+    let interval = oracledb::OracleIntervalYM::new(-25, -11);
+    assert_eq!((interval.years(), interval.months()), (-25, -11));
+    assert_eq!(interval.to_string(), "P-25Y-11M");
+}

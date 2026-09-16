@@ -207,3 +207,30 @@ fn test_1208(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     }
     Ok(())
 }
+
+#[test]
+/// Verifies timestamp components and fixed-offset display behavior without a
+/// database connection.
+fn test_1209() {
+    let timestamp = oracledb::OracleTimestamp::new_timestamp_tz(
+        2026,
+        9,
+        3,
+        14,
+        5,
+        6,
+        123_456_789,
+        5,
+        30,
+    );
+    assert_eq!(timestamp.year(), 2026);
+    assert_eq!(timestamp.month(), 9);
+    assert_eq!(timestamp.day(), 3);
+    assert_eq!(timestamp.hour(), 14);
+    assert_eq!(timestamp.minute(), 5);
+    assert_eq!(timestamp.second(), 6);
+    assert_eq!(timestamp.nanoseconds(), 123_456_789);
+    assert_eq!(timestamp.tz_hour_offset(), 5);
+    assert_eq!(timestamp.tz_minute_offset(), 30);
+    assert_eq!(timestamp.to_string(), "2026-09-03T14:05:06.123456789+05:30");
+}

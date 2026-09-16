@@ -33,11 +33,6 @@ use crate::client::ClientRef;
 use crate::constants;
 use crate::cursor::Cursor;
 use crate::db_type::DbType;
-use crate::db_type::{
-    DB_TYPE_BINARY_DOUBLE, DB_TYPE_BINARY_FLOAT, DB_TYPE_BOOLEAN,
-    DB_TYPE_INTERVAL_DS, DB_TYPE_INTERVAL_YM, DB_TYPE_JSON, DB_TYPE_NUMBER,
-    DB_TYPE_RAW, DB_TYPE_TIMESTAMP, DB_TYPE_VARCHAR, DB_TYPE_VECTOR,
-};
 use crate::error::Error;
 use crate::json::JsonValue;
 use crate::lob::Lob;
@@ -177,6 +172,15 @@ impl DbValue {
                 match resp.read_short_length()? {
                     0 => Ok(None),
                     _ => Ok(Some(DbValue::Rowid(Rowid::deserialize(resp)?))),
+                }
+            }
+            constants::ORA_TYPE_NUM_UROWID => {
+                if in_fetch {
+                    Ok(resp.deserialize_urowid()?.map(DbValue::String))
+                } else {
+                    Ok(Some(DbValue::String(
+                        resp.read_utf8_with_length()?.into(),
+                    )))
                 }
             }
             constants::ORA_TYPE_NUM_JSON => {
@@ -527,7 +531,7 @@ pub trait ToDbValue: ToBuf {
 
 impl ToDbValue for String {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_VARCHAR
+        crate::DB_TYPE_VARCHAR
     }
 
     fn max_size(&self) -> usize {
@@ -537,7 +541,7 @@ impl ToDbValue for String {
 
 impl ToDbValue for &str {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_VARCHAR
+        crate::DB_TYPE_VARCHAR
     }
 
     fn max_size(&self) -> usize {
@@ -547,7 +551,7 @@ impl ToDbValue for &str {
 
 impl ToDbValue for Vec<u8> {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_RAW
+        crate::DB_TYPE_RAW
     }
 
     fn max_size(&self) -> usize {
@@ -557,7 +561,7 @@ impl ToDbValue for Vec<u8> {
 
 impl ToDbValue for &[u8] {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_RAW
+        crate::DB_TYPE_RAW
     }
 
     fn max_size(&self) -> usize {
@@ -567,19 +571,19 @@ impl ToDbValue for &[u8] {
 
 impl ToDbValue for bool {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_BOOLEAN
+        crate::DB_TYPE_BOOLEAN
     }
 }
 
 impl ToDbValue for f32 {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_BINARY_FLOAT
+        crate::DB_TYPE_BINARY_FLOAT
     }
 }
 
 impl ToDbValue for f64 {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_BINARY_DOUBLE
+        crate::DB_TYPE_BINARY_DOUBLE
     }
 }
 
@@ -630,7 +634,7 @@ macro_rules! impl_traits_for_integers {
             }
             impl ToDbValue for $t {
                 fn db_type(&self) -> &'static DbType {
-                    &DB_TYPE_NUMBER
+                    crate::DB_TYPE_NUMBER
                 }
             }
         )*
@@ -643,37 +647,37 @@ impl_traits_for_integers!(
 
 impl ToDbValue for JsonValue {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_JSON
+        crate::DB_TYPE_JSON
     }
 }
 
 impl ToDbValue for OracleIntervalDS {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_INTERVAL_DS
+        crate::DB_TYPE_INTERVAL_DS
     }
 }
 
 impl ToDbValue for OracleIntervalYM {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_INTERVAL_YM
+        crate::DB_TYPE_INTERVAL_YM
     }
 }
 
 impl ToDbValue for OracleNumber {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_NUMBER
+        crate::DB_TYPE_NUMBER
     }
 }
 
 impl ToDbValue for OracleTimestamp {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_TIMESTAMP
+        crate::DB_TYPE_TIMESTAMP
     }
 }
 
 impl ToDbValue for Vector {
     fn db_type(&self) -> &'static DbType {
-        &DB_TYPE_VECTOR
+        crate::DB_TYPE_VECTOR
     }
 }
 
@@ -695,5 +699,15 @@ where
         } else {
             0
         }
+    }
+}
+
+impl ToDbValue for &'static DbType {
+    fn db_type(&self) -> &'static DbType {
+        self
+    }
+
+    fn max_size(&self) -> usize {
+        self.default_size as usize
     }
 }

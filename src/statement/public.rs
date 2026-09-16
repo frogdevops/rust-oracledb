@@ -91,7 +91,7 @@ impl<'sql> Statement<'sql> {
     ) -> Result<ExecResult, Error> {
         let mut holder = self.holder()?;
         let mut response = holder.execute(params)?;
-        Ok(ExecResult::new(holder.out_metadata(), &mut response))
+        Ok(ExecResult::new(holder.statement(), &mut response))
     }
 
     /// Executes a SQL statement against the database multiple times in one
@@ -100,9 +100,14 @@ impl<'sql> Statement<'sql> {
         &self,
         params: BindParameters,
     ) -> Result<ExecBatchResult, Error> {
+        let num_execs = params.num_rows();
         let mut holder = self.holder()?;
         let mut response = holder.execute_batch(params)?;
-        Ok(ExecBatchResult::new(holder.out_metadata(), &mut response))
+        Ok(ExecBatchResult::new(
+            holder.statement(),
+            num_execs,
+            &mut response,
+        ))
     }
 
     /// Executes the statement with the given named parameters and returns an
@@ -114,7 +119,7 @@ impl<'sql> Statement<'sql> {
     ) -> Result<ExecResult, Error> {
         let mut holder = self.holder()?;
         let mut response = holder.execute_named(params)?;
-        Ok(ExecResult::new(holder.out_metadata(), &mut response))
+        Ok(ExecResult::new(holder.statement(), &mut response))
     }
 
     /// Specifies that this statement should not be cached.

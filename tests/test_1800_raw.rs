@@ -125,3 +125,23 @@ fn test_1805(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(values[2].as_deref(), Some(long_value.as_slice()));
     Ok(())
 }
+
+#[rstest]
+/// Verifies RAW IN/OUT data preserves embedded zero and high-bit bytes.
+fn test_1806(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let input = vec![0x00, 0x7f, 0x80, 0xfe];
+    let output_buffer = vec![0_u8; 16];
+    let mut result = conn.execute_named(
+        r#"
+        begin
+            :output_value := utl_raw.concat(:input_value, hextoraw('FF'));
+        end;
+        "#,
+        &[("input_value", &input), ("output_value", &output_buffer)],
+    )?;
+    assert_eq!(
+        result.out_bind_data().get::<Vec<u8>>(0)?,
+        vec![0x00, 0x7f, 0x80, 0xfe, 0xff]
+    );
+    Ok(())
+}

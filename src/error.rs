@@ -34,6 +34,7 @@ use std::io;
 use std::str;
 
 use crate::db_type::DbType;
+use crate::response::DbError;
 use crate::response::ResponseLocation;
 
 /// Types of errors returned by the library.
@@ -43,7 +44,7 @@ pub enum ErrorKind {
     ArrowOperation,
     CallTimeoutExceeded,
     ColumnTruncated(usize, usize),
-    DbError(String),
+    DbError(DbError),
     DeadConnection,
     DifferentTypes(&'static DbType, &'static DbType),
     EndUserSecurityContextRequiresTcps,
@@ -191,7 +192,7 @@ impl fmt::Display for Error {
                 "column truncated to {col_value_size} bytes. \
                  Untruncated was {actual_size} bytes."
             )?,
-            ErrorKind::DbError(message) => fmt.write_str(message)?,
+            ErrorKind::DbError(db_error) => fmt.write_str(db_error.message())?,
             ErrorKind::DeadConnection => {
                 fmt.write_str("the database or network closed the connection")?
             }
@@ -455,8 +456,8 @@ impl Error {
         )
     }
 
-    pub(crate) fn db_error(message: String) -> Error {
-        Error::new(ErrorKind::DbError(message), None)
+    pub(crate) fn db_error(db_error: DbError) -> Error {
+        Error::new(ErrorKind::DbError(db_error), None)
     }
 
     pub(crate) fn dead_connection() -> Error {

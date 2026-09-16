@@ -309,14 +309,14 @@ fn test_1113(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         &[],
     )?;
     let columns = cursor.columns();
-    assert_eq!(columns[0].db_type(), &oracledb::DB_TYPE_NUMBER);
+    assert_eq!(columns[0].db_type(), oracledb::DB_TYPE_NUMBER);
     assert_eq!(columns[0].precision(), 8);
     assert_eq!(columns[0].scale(), 0);
     assert_eq!(columns[1].precision(), 8);
     assert_eq!(columns[1].scale(), 2);
     assert_eq!(columns[2].precision(), 8);
     assert_eq!(columns[2].scale(), -2);
-    assert_eq!(columns[3].db_type(), &oracledb::DB_TYPE_NUMBER);
+    assert_eq!(columns[3].db_type(), oracledb::DB_TYPE_NUMBER);
     Ok(())
 }
 
@@ -346,9 +346,9 @@ fn test_1115(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         &[],
     )?;
     let columns = cursor.columns();
-    assert_eq!(columns[0].db_type(), &oracledb::DB_TYPE_NUMBER);
-    assert_eq!(columns[1].db_type(), &oracledb::DB_TYPE_NUMBER);
-    assert_eq!(columns[2].db_type(), &oracledb::DB_TYPE_NUMBER);
+    assert_eq!(columns[0].db_type(), oracledb::DB_TYPE_NUMBER);
+    assert_eq!(columns[1].db_type(), oracledb::DB_TYPE_NUMBER);
+    assert_eq!(columns[2].db_type(), oracledb::DB_TYPE_NUMBER);
     for row in cursor {
         let row = row?;
         let float_col: oracledb::OracleNumber = row.get(0)?;
@@ -404,5 +404,30 @@ fn test_1118(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             oracledb::ErrorKind::UnsupportedConversion(_, _)
         ));
     }
+    Ok(())
+}
+
+#[rstest]
+/// Verifies PL/SQL BINARY_INTEGER input/output at both signed boundaries
+/// reachable after a one-unit adjustment.
+#[case(i32::MIN, i32::MIN + 1)]
+#[case(0, 1)]
+#[case(i32::MAX - 1, i32::MAX)]
+fn test_1119(
+    conn: oracledb::Connection,
+    #[case] input: i32,
+    #[case] expected: i32,
+) -> Result<(), oracledb::Error> {
+    let mut result = conn.execute_named(
+        r#"
+        declare
+            value binary_integer := :input_value;
+        begin
+            :output_value := value + 1;
+        end;
+        "#,
+        &[("input_value", &input), ("output_value", &0)],
+    )?;
+    assert_eq!(result.out_bind_data().get::<i32>(0)?, expected);
     Ok(())
 }

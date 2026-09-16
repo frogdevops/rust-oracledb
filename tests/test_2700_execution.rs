@@ -76,22 +76,19 @@ fn test_2700(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 }
 
 #[rstest]
-/// Tests PL/SQL OUT and IN/OUT binds through ExecResult::returned_data().
+/// Tests PL/SQL OUT and IN/OUT binds through ExecResult::out_bind_data().
 fn test_2701(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let mut result = conn.execute_named(
-        "begin :out_value := :input_value * 2; end;",
-        &[("input_value", &21), ("out_value", &0)],
-    )?;
-    let returned_data = result.returned_data()?;
-    assert_eq!(returned_data.len(), 1);
-    let out_value: i32 = returned_data[0].get(0)?;
-    assert_eq!(out_value, 42);
-    assert!(result.returned_data()?.is_empty());
-
+    for value in [100, 200, 300] {
+        let mut result = conn.execute_named(
+            "begin :out_value := :input_value * 2; end;",
+            &[("input_value", &value), ("out_value", &0)],
+        )?;
+        let out_bind_data = result.out_bind_data();
+        assert_eq!(out_bind_data.get::<i32>(0)?, value * 2);
+    }
     let mut result =
         conn.execute("begin :1 := :1 || :2; end;", &[&"value", &"-updated"])?;
-    let returned_data = result.returned_data()?;
-    let value: String = returned_data[0].get(0)?;
+    let value: String = result.out_bind_data().get(0)?;
     assert_eq!(value, "value-updated");
     Ok(())
 }
@@ -188,9 +185,7 @@ fn test_2705(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         "begin :out_value := cast(null as number); end;",
         &[("out_value", &0)],
     )?;
-    let returned_data = result.returned_data()?;
-    assert_eq!(returned_data.len(), 1);
-    let out_value: Option<i32> = returned_data[0].get(0)?;
+    let out_value: Option<i32> = result.out_bind_data().get(0)?;
     assert!(out_value.is_none());
     Ok(())
 }
@@ -446,7 +441,6 @@ fn test_2715(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 
 	assert_eq!(sec_named_idx, 2);
 	assert_eq!(sec_named_val, "two-updated");
-
     Ok(())
 }
 
@@ -729,21 +723,106 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 }
 
 #[rstest]
+/// Tests PL/SQL OUT binds returned from each execute_batch invocation.
+fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let params = oracledb::BindParameters::Slice(&[
+        &[&0, &100],
+        &[&0, &200],
+        &[&0, &300],
+    ]);
+    let mut result = conn.execute_batch("begin :2 := :1 * 2; end;", params)?;
+
+    let out_bind_data = result.out_bind_data();
+    let values: Vec<i32> = out_bind_data
+        .iter()
+        .map(|row| row.get(0).unwrap())
+        .collect();
+    assert_eq!(values, vec![200, 400, 600]);
+    Ok(())
+}
+
+#[rstest]
+/// Tests DML RETURNING data grouped by execute_batch invocation.
+fn test_2723(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2723",
+        "id number primary key, value varchar2(30)",
+    )?;
+
+    conn.execute("insert into test_2723 values (1, 'one')", &[])?;
+    conn.execute("insert into test_2723 values (2, 'two')", &[])?;
+    conn.execute("insert into test_2723 values (3, 'three')", &[])?;
+    let params = oracledb::BindParameters::Slice(&[
+        &[&"-first", &1, &0],
+        &[&"-second", &2, &0],
+        &[&"-third", &3, &0],
+    ]);
+    let mut result = conn.execute_batch(
+        r#"
+        update test_2723
+            set value = value || :1
+        where id <= :2
+        returning id
+        into :3
+        "#,
+        params,
+    )?;
+    conn.commit()?;
+
+    let returned_data = result.returned_data()?;
+    let ids: Vec<Vec<usize>> = returned_data
+        .iter()
+        .map(|rows| rows.iter().map(|row| row.get(0).unwrap()).collect())
+        .collect();
+    assert_eq!(ids, vec![vec![1], vec![1, 2], vec![1, 2, 3]]);
+    Ok(())
+}
+
+#[rstest]
+/// Verifies the same cached statement can be reused after a database error.
+fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table(
+        &conn,
+        "test_2724",
+        "id number primary key, value varchar2(30)",
+    )?;
+    let statement = conn.statement("insert into test_2724 values (:1, :2)")?;
+    statement.execute(&[&1, &"first"])?;
+    conn.commit()?;
+
+    let error = match statement.execute(&[&1, &"duplicate"]) {
+        Ok(_) => panic!("a duplicate primary key must be rejected"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error.kind(),
+        oracledb::ErrorKind::DbError(db_error) if db_error.code() == 1
+    ));
+
+    statement.execute(&[&2, &"after-error"])?;
+    let row =
+        conn.query_row("select value from test_2724 where id = 2", &[])?;
+    assert_eq!(row.get::<String>(0)?, "after-error");
+    Ok(())
+}
+
+#[rstest]
 /// Tests ExecResult::returned_row() for exact single-row enforcement:
 /// - Succeeds when exactly 1 row is returned.
 /// - Returns NoDataFound when 0 rows are returned.
 /// - Returns OutOfRange when multiple rows are returned.
-fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+fn test_2725(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let _guard = common::create_table(
         &conn,
-        "test_2722",
+        "test_2725",
         "id number primary key, value varchar2(30)",
     )?;
 
     // 1. Insert 3 rows
     for i in 1..=3 {
         conn.execute(
-            "insert into test_2722 (id, value) values (:1, :2)",
+            "insert into test_2725 (id, value) values (:1, :2)",
             &[&i, &format!("value_{}", i)],
         )?;
     }
@@ -753,7 +832,7 @@ fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let out_id = 0i64;
     let out_value = " ".repeat(30);
     let mut result = conn.execute_named(
-        "update test_2722 set value = 'single_update' where id = 1 \
+        "update test_2725 set value = 'single_update' where id = 1 \
          returning id, value into :out_id, :out_value",
         &[
             ("out_id", &out_id),
@@ -766,7 +845,7 @@ fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 
     // Case B: 0 rows affected -> Err(NoDataFound)
     let mut result_empty = conn.execute_named(
-        "update test_2722 set value = 'no_match' where id = 9999 \
+        "update test_2725 set value = 'no_match' where id = 9999 \
          returning id, value into :out_id, :out_value",
         &[
             ("out_id", &out_id),
@@ -780,7 +859,7 @@ fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 
     // Case C: Multiple rows affected (2 rows: id=2, id=3) -> Err(OutOfRange)
     let mut result_multi = conn.execute_named(
-        "update test_2722 set value = 'multi_update' where id > 1 \
+        "update test_2725 set value = 'multi_update' where id > 1 \
          returning id, value into :out_id, :out_value",
         &[
             ("out_id", &out_id),
@@ -805,7 +884,7 @@ fn test_2722(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 /// - Succeeds when exactly 1 row is returned.
 /// - Returns NoDataFound when 0 rows are returned.
 /// - Returns OutOfRange when multiple rows are returned.
-fn test_2723(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+fn test_2726(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     // 1. Exactly 1 row -> Ok(Row)
     let row = conn.query_row("select 42 from dual", &[])?;
     assert_eq!(row.get::<i64>(0)?, 42);
@@ -854,16 +933,16 @@ fn test_2723(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 #[rstest]
 /// Tests that DML RETURNING into an out bind properly reports an error
 /// and does not hang on socket read when a statement constraint fails.
-fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+fn test_2727(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let _guard = common::create_table(
         &conn,
-        "test_2724_dml_err",
+        "test_2727_dml_err",
         "id number primary key, val number check (val > 0)",
     )?;
 
     let out_id: i64 = 0;
     let res = conn.execute_named(
-        "insert into test_2724_dml_err (id, val) values (1, -1) returning id into :out_id",
+        "insert into test_2727_dml_err (id, val) values (1, -1) returning id into :out_id",
         &[("out_id", &out_id)],
     );
 
@@ -871,6 +950,6 @@ fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         Err(e) => e,
         Ok(_) => panic!("expected error but execution succeeded"),
     };
-    assert!(err.to_string().contains("ORA-02290"));
+    assert!(err.to_string().contains("ORA-02290") || matches!(err.kind(), oracledb::ErrorKind::DbError(db_error) if db_error.code() == 2290));
     Ok(())
 }

@@ -26,7 +26,6 @@
 // around the locator returned by the database when fetching LOB locators.
 //-----------------------------------------------------------------------------
 
-use crate::DB_TYPE_BFILE;
 use crate::client::ClientRef;
 use crate::constants;
 use crate::db_type::DbType;
@@ -87,6 +86,11 @@ impl PendingLobData {
             }))
         }
     }
+
+    /// Returns the locator.
+    pub(crate) fn take_locator(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.locator)
+    }
 }
 
 impl fmt::Debug for Lob {
@@ -130,7 +134,7 @@ impl Lob {
 
     /// Returns the TTC open mode to use for this LOB type.
     fn open_mode(&self) -> u64 {
-        if self.db_type == &DB_TYPE_BFILE {
+        if self.db_type == crate::DB_TYPE_BFILE {
             constants::TTC_LOB_OPEN_READ_ONLY
         } else {
             constants::TTC_LOB_OPEN_READ_WRITE
@@ -192,6 +196,43 @@ impl Lob {
         self.process_lob_op(LobOp::Write(offset.try_into().unwrap(), data))?;
         self.size = None;
         Ok(())
+    }
+
+    /// Creates an empty temporary LOB.
+    pub(crate) fn create_temp(
+        client_ref: ClientRef,
+        db_type: &'static DbType,
+    ) -> Result<Lob, Error> {
+        if db_type != crate::DB_TYPE_BLOB
+            && db_type != crate::DB_TYPE_CLOB
+            && db_type != crate::DB_TYPE_NCLOB
+        {
+            return Err(Error::unsupported_db_type(db_type));
+        }
+        let locator = vec![0; 40];
+        let mut message = {
+            let mut client = client_ref.lock().unwrap();
+            let mut message = LobOpMessage::new(
+                &locator,
+                LobOp::CreateTemp {
+                    ora_type_num: db_type.ora_type_num,
+                    csfrm: db_type.csfrm,
+                },
+            );
+
+            client.process_message(&mut message)?;
+            message
+        };
+
+        let locator = message.take_returned_locator().unwrap();
+        Ok(Self {
+            client_ref,
+            locator,
+            db_type,
+            size: Some(0),
+            chunk_size: None,
+            offset: 1,
+        })
     }
 
     /// Creates a LOB from its internal data.
@@ -258,6 +299,13 @@ impl Lob {
             self.offset = new_size + 1;
         }
         Ok(())
+    }
+}
+
+impl Drop for Lob {
+    fn drop(&mut self) {
+        let locator = std::mem::take(&mut self.locator);
+        self.client_ref.lock().unwrap().add_lob_to_close(locator);
     }
 }
 
@@ -332,7 +380,7 @@ impl io::Write for Lob {
         if buf.is_empty() {
             return Ok(0);
         }
-        if self.db_type == &DB_TYPE_BFILE {
+        if self.db_type == crate::DB_TYPE_BFILE {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "writing to BFILE is not supported",

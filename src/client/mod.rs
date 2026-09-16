@@ -48,6 +48,7 @@ use crate::messages::ConnectMessage;
 use crate::messages::DataTypesMessage;
 use crate::messages::EofMessage;
 use crate::messages::FastAuthMessage;
+use crate::messages::FlushOutBindsMessage;
 use crate::messages::LogoffMessage;
 use crate::messages::MarkerMessage;
 use crate::messages::Message;
@@ -89,6 +90,7 @@ pub struct Client {
     pool_id: String,
     last_warning: Option<String>,
     security_context: Option<EndUserSecurityContext>,
+    temp_lobs_to_close: Vec<Vec<u8>>,
 }
 
 pub(crate) type ClientRef = std::sync::Arc<std::sync::Mutex<Client>>;
@@ -130,39 +132,30 @@ impl Client {
 
     /// Receives a data packet from the database. Control packets and marker
     /// packets are processed. Only data packets are returned.
-    fn receive_data_packet(&mut self) -> Result<Packet, Error> {
+    fn receive_data_packet(&mut self) -> Result<(Packet, bool), Error> {
         loop {
-            match self.receive_packet() {
-                Ok(packet_opt) => {
-                    if let Some(packet) = packet_opt {
-                        return Ok(packet);
+            match self.transport.receive_packet() {
+                Ok(packet) => match packet.packet_type {
+                    constants::PACKET_TYPE_CONTROL => {
+                        self.process_control_packet(packet)?;
+                        continue;
                     }
-                }
+                    constants::PACKET_TYPE_MARKER => {
+                        let packet = self
+                            .reset()
+                            .map_err(|_| self.unrecoverable_error())?;
+                        return Ok((packet, false));
+                    }
+                    _ => return Ok((packet, true)),
+                },
                 Err(err) => {
                     if err.is_call_timeout_exceeded() {
-                        return self.recover_from_error(err);
+                        let packet = self.recover_from_error(err)?;
+                        return Ok((packet, false));
                     }
                     return Err(err);
                 }
             }
-        }
-    }
-
-    /// Receives a packet from the database and either processes it immediately
-    /// (and returns None) or returns it directly for the caller to process.
-    fn receive_packet(&mut self) -> Result<Option<Packet>, Error> {
-        let packet = self.transport.receive_packet()?;
-        match packet.packet_type {
-            constants::PACKET_TYPE_CONTROL => {
-                self.process_control_packet(packet)?;
-                Ok(None)
-            }
-            constants::PACKET_TYPE_MARKER => {
-                let packet =
-                    self.reset().map_err(|_| self.unrecoverable_error())?;
-                Ok(Some(packet))
-            }
-            _ => Ok(Some(packet)),
         }
     }
 
@@ -173,10 +166,13 @@ impl Client {
         let mut packets = Vec::<Packet>::new();
         let supports_end_of_response = self.supports_end_of_response();
         loop {
-            let packet = self.receive_data_packet()?;
-            let has_end_of_response = packet.has_end_of_response();
+            let (packet, check_end_of_response) =
+                self.receive_data_packet()?;
+            let wait_for_more = check_end_of_response
+                && supports_end_of_response
+                && !packet.has_end_of_response();
             packets.push(packet);
-            if !supports_end_of_response || has_end_of_response {
+            if !wait_for_more {
                 break;
             }
         }
@@ -198,31 +194,10 @@ impl Client {
             }
             return Err(e);
         }
-        if response.flush_out_binds {
-            response.flush_out_binds = false;
-            self.transport.send_packets(
-                constants::PACKET_TYPE_DATA,
-                0,
-                0,
-                &[constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS],
-            )?;
-            let new_packets = self.receive_packets()?;
-            let mut new_resp = Response::new();
-            new_resp.add_packets(new_packets);
-            while let Err(e) = message.deserialize(self, &mut new_resp) {
-                if e.is_out_of_data() {
-                    new_resp.add_packets(self.receive_packets()?);
-                    continue;
-                }
-                return Err(e);
-            }
-            message.post_deserialize(self, &mut new_resp)?;
-            self.process_call_status(new_resp.call_status());
-            if let Some(warning) = new_resp.take_warning() {
-                self.last_warning = Some(warning);
-            }
-	        *response = new_resp;
-            return Ok(());
+        if response.get_flush_out_binds() {
+            self.send_message(&mut FlushOutBindsMessage)?;
+            response.add_packets(self.receive_packets()?);
+            message.deserialize(self, response)?;
         }
         message.post_deserialize(self, response)?;
         self.process_call_status(response.call_status());
@@ -311,6 +286,39 @@ impl Client {
         buf.write_ub4(num_cursors);
         for cursor_id in cursors {
             buf.write_ub2(cursor_id);
+        }
+    }
+
+    /// Writes the temporary LOB locators that can be freed by the server.
+    fn write_piggyback_close_temp_lobs(&mut self, buf: &mut WriteBuffer) {
+        let temp_lobs_to_close = mem::take(&mut self.temp_lobs_to_close);
+        let total_size: usize = temp_lobs_to_close.iter().map(Vec::len).sum();
+        buf.write_piggyback_header(self, constants::TTC_RPC_LOB_OP);
+        buf.write_u8(1); // pointer (temporary LOB array)
+        buf.write_ub4(total_size.try_into().unwrap());
+        buf.write_u8(0); // destination locator pointer
+        buf.write_ub4(0);
+        buf.write_ub4(0); // source locator offset
+        buf.write_ub4(0);
+        buf.write_u8(0); // source offset pointer
+        buf.write_u8(0); // destination offset pointer
+        buf.write_u8(0); // character set pointer
+        buf.write_ub4(
+            constants::TTC_LOB_OP_FREE_TEMP | constants::TTC_LOB_OP_ARRAY,
+        );
+        buf.write_u8(0); // SCN pointer
+        buf.write_ub4(0);
+        buf.write_ub8(0);
+        buf.write_ub8(0);
+        buf.write_u8(0); // amount pointer
+        buf.write_u8(0); // array destination locator pointer
+        buf.write_ub4(0);
+        buf.write_u8(0); // array source locator pointer
+        buf.write_ub4(0);
+        buf.write_u8(0); // array source offset pointer
+        buf.write_ub4(0);
+        for locator in temp_lobs_to_close {
+            buf.write_bytes(&locator);
         }
     }
 
@@ -507,8 +515,24 @@ impl Client {
         if self.pending_session_state != 0 {
             self.write_piggyback_session_state(buf);
         }
+        if !self.temp_lobs_to_close.is_empty() {
+            self.write_piggyback_close_temp_lobs(buf);
+        }
         if self.pending_ha_readiness {
             self.write_piggyback_ha_readiness(buf);
+        }
+    }
+
+    /// Adds a temporary LOB locator to the list of locators that will be
+    /// freed by the server on the next round trip.
+    pub(crate) fn add_lob_to_close(&mut self, locator: Vec<u8>) {
+        let flags1 = locator[constants::TTC_LOB_LOC_OFFSET_FLAG_1];
+        let flags4 = locator[constants::TTC_LOB_LOC_OFFSET_FLAG_4];
+
+        if flags1 & constants::TTC_LOB_LOC_FLAGS_ABSTRACT != 0
+            || flags4 & constants::TTC_LOB_LOC_FLAGS_TEMP != 0
+        {
+            self.temp_lobs_to_close.push(locator);
         }
     }
 
@@ -680,6 +704,7 @@ impl Client {
     pub(crate) fn end_request(&mut self) -> Result<(), Error> {
         self.security_context = None;
         self.last_warning = None;
+        self.transport.set_read_timeout(None)?;
         if self.in_request {
             self.in_request = false;
             if self.pending_session_state
@@ -715,6 +740,11 @@ impl Client {
     /// Returns the last warning that was generated by the client.
     pub(crate) fn get_last_warning(&self) -> Option<String> {
         self.last_warning.clone()
+    }
+
+    /// Returns the database character set id used for NCHAR data.
+    pub(crate) fn get_ncharset_id(&self) -> u16 {
+        self.ncharset_id
     }
 
     /// Returns the runtime capabilities.
@@ -773,6 +803,7 @@ impl Client {
             security_context: None,
             transaction_in_progress: false,
             pool_id,
+            temp_lobs_to_close: Vec::new(),
         }
     }
 

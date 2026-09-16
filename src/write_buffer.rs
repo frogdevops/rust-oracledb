@@ -420,3 +420,20 @@ where
         }
     }
 }
+
+impl ToBuf for &'static DbType {
+    fn to_buf(
+        &self,
+        buf: &mut WriteBuffer,
+        _db_type: &'static DbType,
+        _write_length: bool,
+    ) {
+        match *self {
+            crate::DB_TYPE_CURSOR => {
+                buf.write_u8(1); // length of integer
+                buf.write_u8(0); // value of integer (cursor number)
+            }
+            _ => buf.write_u8(0),
+        }
+    }
+}

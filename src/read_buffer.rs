@@ -158,9 +158,16 @@ impl ReadBuffer {
         Ok(buf[0] as i8)
     }
 
+    /// Reads the remaining bytes out of the buffer.
+    pub(crate) fn read_remaining_bytes(&mut self) -> &[u8] {
+        let buf = &self.buf[self.pos..self.buf.len()];
+        self.pos = self.buf.len();
+        buf
+    }
+
     /// Reads an encoded signed 32-bit integer from the buffer. An error is
     /// returned if such an integer cannot be read from the buffer.
-    pub fn read_sb4(&mut self) -> Result<i32, Error> {
+    pub(crate) fn read_sb4(&mut self) -> Result<i32, Error> {
         let (buf, is_negative) = self.get_integer_buf_and_sign(4)?;
         let value = u32::from_buf(buf);
         if is_negative {
@@ -172,7 +179,7 @@ impl ReadBuffer {
 
     /// Reads an encoded signed 64-bit integer from the buffer. An error is
     /// returned if such an integer cannot be read from the buffer.
-    pub fn read_sb8(&mut self) -> Result<i64, Error> {
+    pub(crate) fn read_sb8(&mut self) -> Result<i64, Error> {
         let (buf, is_negative) = self.get_integer_buf_and_sign(8)?;
         let value = u64::from_buf(buf);
         if is_negative {

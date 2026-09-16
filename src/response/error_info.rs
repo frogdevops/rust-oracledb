@@ -34,12 +34,11 @@ use crate::error::Error;
 use crate::response::Response;
 use crate::rowid::Rowid;
 
-pub struct ErrorInfo {
-    pub(super) num: usize,
+pub(crate) struct ErrorInfo {
+    db_error: Option<DbError>,
     cursor_id: u16,
     flags: u8,
-    pub(super) rowcount: u64,
-    message: String,
+    rowcount: u64,
 }
 
 impl ErrorInfo {
@@ -49,69 +48,68 @@ impl ErrorInfo {
         client: &Client,
     ) -> Result<ErrorInfo, Error> {
         resp.deserialize_status()?;
-        resp.read_ub4()?; // current row number
-        resp.read_ub2()?; // error number (short)
-        resp.read_ub2()?; // array elem error
-        resp.read_ub2()?; // array elem error
+        let _current_row_num = resp.read_ub4()?;
+        let _error_num_short = resp.read_ub2()?;
+        let _array_elem_error_1 = resp.read_ub2()?;
+        let _array_elem_error_2 = resp.read_ub2()?;
         let cursor_id = resp.read_ub2()?;
-        resp.read_ub2()?; // error position
-        resp.read_u8()?; // sql type (19c and earlier)
-        resp.read_u8()?; // fatal?
-        resp.read_u8()?; // flags
-        resp.read_u8()?; // user cursor options
-        resp.read_u8()?; // UPI parameter
+        let error_pos = resp.read_ub2()?;
+        let _old_sql_type = resp.read_u8()?;
+        let _fatal = resp.read_u8()?;
+        let _flags_1 = resp.read_u8()?;
+        let _user_cursor_options = resp.read_u8()?;
+        let _upi_parameter = resp.read_u8()?;
         let flags = resp.read_u8()?;
         let _rowid = Rowid::deserialize(resp)?;
-        resp.read_ub4()?; // OS error
-        resp.read_u8()?; // statement number
-        resp.read_u8()?; // call number
-        resp.read_ub2()?; // padding
-        resp.read_ub4()?; // success iters
-        let num_bytes = resp.read_ub4()?; // logical rowid
-        if num_bytes > 0 {
-            resp.read_bytes_with_length()?;
+        let _os_error = resp.read_ub4()?;
+        let _statement_num = resp.read_u8()?;
+        let _call_num = resp.read_u8()?;
+        let _padding = resp.read_ub2()?;
+        let _success_iters = resp.read_ub4()?;
+        if resp.read_ub4()? > 0 {
+            let _logical_rowid = resp.read_bytes_with_length()?;
         }
-        let num_errors = resp.read_ub2()?;
-        if num_errors > 0 {
+        if resp.read_ub2()? > 0 {
+            // batch errors
             todo!();
         }
-        let num_offsets = resp.read_ub4()?;
-        if num_offsets > 0 {
+        if resp.read_ub4()? > 0 {
+            // batch error offsets
             todo!();
         }
-        let num_messages = resp.read_ub2()?;
-        if num_messages > 0 {
+        if resp.read_ub2()? > 0 {
+            // batch error messages
             todo!();
         }
         let error_num = resp.read_ub4()?;
         let rowcount = resp.read_ub8()?;
         if client.supports_ttc_field_version(constants::TTC_FIELD_VERSION_20_1)
         {
-            resp.read_ub4()?; // sql type
-            resp.read_ub4()?; // server checksum
+            let _sql_type = resp.read_ub4()?;
+            let _server_checksum = resp.read_ub4()?;
         }
-        let message: &str = if error_num == 0 {
-            ""
+        let db_error = if error_num == 0 {
+            None
         } else {
-            &resp.read_utf8_with_length()?
+            let message = resp.read_utf8_with_length()?;
+            Some(DbError {
+                code: error_num as usize,
+                offset: error_pos as usize,
+                message: message.trim_end().to_string(),
+            })
         };
+
         Ok(ErrorInfo {
-            num: error_num as usize,
             cursor_id,
             flags,
             rowcount,
-            message: message.trim_end().to_string(),
+            db_error,
         })
     }
 
     /// Returns the cursor id.
     pub(crate) fn cursor_id(&self) -> u16 {
         self.cursor_id
-    }
-
-    /// Returns the error message.
-    pub(crate) fn error_message(&self) -> &str {
-        &self.message
     }
 
     /// Returns whether or not a compilation warning was returned.
@@ -122,5 +120,48 @@ impl ErrorInfo {
     /// Returns the row count.
     pub(crate) fn rowcount(&self) -> u64 {
         self.rowcount
+    }
+
+    /// Takes the error message from the response and returns it.
+    pub(crate) fn take_db_error(&mut self) -> Option<DbError> {
+        self.db_error.take()
+    }
+
+    /// Transfers information from another error info structure that was
+    /// received earlier. This is intended for us when a batch of statements is
+    /// being executed and a single response is being returned.
+    pub(crate) fn transfer_into(&mut self, other_info: &mut ErrorInfo) {
+        self.rowcount += other_info.rowcount;
+    }
+}
+
+/// Represents errors returned by the database.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DbError {
+    code: usize,
+    offset: usize,
+    message: String,
+}
+
+impl std::fmt::Display for DbError {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "{}", self.message)
+    }
+}
+
+impl DbError {
+    /// Returns the error code associated with the database error.
+    pub fn code(&self) -> usize {
+        self.code
+    }
+
+    /// Returns the error message associated with the database error.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Returns the offset associated with the database error.
+    pub fn offset(&self) -> usize {
+        self.offset
     }
 }

@@ -23,9 +23,9 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// plsql_in_out_binds.rs
+// ref_cursor.rs
 //
-// Shows using positional and named IN/OUT binds with PL/SQL.
+// Shows how to call a PL/SQL procedure to get a REF cursor and fetch from it.
 //-----------------------------------------------------------------------------
 
 mod common;
@@ -36,46 +36,30 @@ fn main() -> Result<(), oracledb::Error> {
 
     connection.execute(
         r#"
-        create or replace procedure rso_examples_proc (
-            p1 in number,
-            p2 in out varchar2
+        create or replace procedure rso_examples_ref_cursor (
+            a_NumVal number,
+            a_RefCursor out sys_refcursor
         ) as
         begin
-            p2 := p2 || ' ' || p1;
+            open a_RefCursor for
+            select level * 100
+            from dual connect by level <= a_NumVal;
         end;
         "#,
         &[],
     )?;
 
-    // positional bind variables
-    let data = [(440, "Gregory"), (550, "Haley"), (660, "Ian")];
-    let mut outvals = Vec::new();
+    let mut result = connection.execute(
+        "begin rso_examples_ref_cursor(:1, :2); end;",
+        &[&3, &oracledb::DB_TYPE_CURSOR],
+    )?;
 
-    for (p1, p2) in data {
-        let mut result = connection
-            .execute("begin rso_examples_proc(:1, :2); end;", &[&p1, &p2])?;
-
-        let outval: String = result.out_bind_data().get(0)?;
-
-        outvals.push(outval);
+    let cursor: oracledb::Cursor = result.out_bind_data().take(0)?;
+    for row_result in cursor {
+        let row = row_result?;
+        let value: usize = row.get(0)?;
+        println!("Fetched {value}");
     }
-    println!("Positional binds: {outvals:?}");
-
-    // named bind variables
-    let data = [(440, "Julia"), (550, "Tina"), (660, "Tracy")];
-    let mut outvals = Vec::new();
-
-    for (p1, p2) in data {
-        let mut result = connection.execute_named(
-            "begin rso_examples_proc(:p1, :p2); end;",
-            &[("p1", &p1), ("p2", &p2)],
-        )?;
-
-        let outval: String = result.out_bind_data().get(0)?;
-
-        outvals.push(outval);
-    }
-    println!("Named binds: {outvals:?}");
 
     Ok(())
 }

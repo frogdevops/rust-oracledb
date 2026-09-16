@@ -35,8 +35,15 @@ pub struct TableGuard<'a> {
 
 impl TableGuard<'_> {
     /// Creates the table with the given definition.
-    fn create_table(&self, definition: &str) -> Result<(), oracledb::Error> {
-        let sql = format!("create table {} ({})", self.table_name, definition);
+    fn create_table(
+        &self,
+        definition: &str,
+        options: &str,
+    ) -> Result<(), oracledb::Error> {
+        let sql = format!(
+            "create table {} ({}) {}",
+            self.table_name, definition, options
+        );
         self.conn.execute(&sql, &[])?;
         Ok(())
     }
@@ -47,8 +54,8 @@ impl TableGuard<'_> {
         let sql = format!("drop table {} purge", self.table_name);
         let result = self.conn.execute(&sql, &[]);
         if let Err(err) = result
-            && let oracledb::ErrorKind::DbError(message) = err.kind()
-            && !message.starts_with("ORA-00942:")
+            && let oracledb::ErrorKind::DbError(db_error) = err.kind()
+            && db_error.code() != 942
         {
             return Err(err);
         }
@@ -91,7 +98,21 @@ pub fn create_table<'a>(
 ) -> Result<TableGuard<'a>, oracledb::Error> {
     let guard = TableGuard { conn, table_name };
     guard.drop_table()?;
-    guard.create_table(definition)?;
+    guard.create_table(definition, "")?;
+    Ok(guard)
+}
+
+#[allow(dead_code)]
+/// Creates the table with the given name and definition and options.
+pub fn create_table_with_options<'a>(
+    conn: &'a oracledb::Connection,
+    table_name: &'a str,
+    definition: &str,
+    options: &str,
+) -> Result<TableGuard<'a>, oracledb::Error> {
+    let guard = TableGuard { conn, table_name };
+    guard.drop_table()?;
+    guard.create_table(definition, options)?;
     Ok(guard)
 }
 
@@ -162,4 +183,23 @@ pub fn skip_unless_vectors_supported(conn: &oracledb::Connection) -> bool {
     } else {
         skip_test("database does not support vectors (requires 23.4+)")
     }
+}
+
+#[allow(dead_code)]
+/// Returns the number of temporary LOBs held by this session.
+pub fn temporary_lob_count(
+    conn: &oracledb::Connection,
+) -> Result<i64, oracledb::Error> {
+    let sid: String = conn
+        .query_row("select sys_context('USERENV', 'SID') from dual", &[])?
+        .get(0)?;
+    conn.query_row(
+        r#"
+        select cache_lobs + nocache_lobs + abstract_lobs
+        from v$temporary_lobs
+        where sid = :1
+        "#,
+        &[&sid],
+    )?
+    .get(0)
 }

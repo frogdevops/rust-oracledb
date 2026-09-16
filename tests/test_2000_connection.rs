@@ -30,7 +30,7 @@ mod common;
 
 use common::conn;
 use rstest::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Creates an end user security context for testing.
 fn create_end_user_security_context(
@@ -252,5 +252,31 @@ fn test_2008(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let row = observer.query_row("select count(*) from test_2008", &[])?;
     let count: i32 = row.get(0)?;
     assert_eq!(count, 0);
+    Ok(())
+}
+
+#[rstest]
+/// Verifies a real call timeout interrupts a long operation and leaves the
+/// connection reusable after protocol reset.
+fn test_2009(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    conn.set_call_timeout(Some(Duration::from_millis(600)))?;
+    let started = Instant::now();
+    let error = match conn.execute("begin dbms_session.sleep(1); end;", &[]) {
+        Ok(_) => {
+            panic!("the database call must exceed the configured timeout")
+        }
+        Err(error) => error,
+    };
+    let elapsed = started.elapsed();
+    assert!(matches!(
+        error.kind(),
+        oracledb::ErrorKind::CallTimeoutExceeded
+    ));
+    assert!(elapsed >= Duration::from_millis(200));
+    assert!(elapsed < Duration::from_secs(5));
+
+    conn.set_call_timeout(None)?;
+    let row = conn.query_row("select 2009 from dual", &[])?;
+    assert_eq!(row.get::<i32>(0)?, 2009);
     Ok(())
 }

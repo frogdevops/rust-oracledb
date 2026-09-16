@@ -34,38 +34,27 @@ use rstest::*;
 #[rstest]
 /// test fetching ROWID
 fn test_1900(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let mut cursor =
-        conn.query("select cast(rowid as varchar2(18)) from dual", &[])?;
-    let mut rowid_as_string = String::new();
-    for row in cursor {
-        let row = row?;
-        rowid_as_string = row.get(0)?;
-    }
-    cursor = conn.query("select rowid from dual", &[])?;
-    for row in cursor {
-        let row = row?;
-        let fetched_val: String = row.get(0)?;
-        assert_eq!(fetched_val.to_string(), rowid_as_string);
-    }
+    let row =
+        conn.query_row("select cast(rowid as varchar2(18)) from dual", &[])?;
+    let rowid_as_string: String = row.get(0)?;
+    let row = conn.query_row("select rowid from dual", &[])?;
+    assert_eq!(row.get::<String>(0)?, rowid_as_string);
     Ok(())
 }
 
 #[rstest]
 /// test ROWID metadata and string representation
 fn test_1901(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let cursor = conn.query(
+    let row = conn.query_row(
         "select rowid as rid, cast(rowid as varchar2(20)) from dual",
         &[],
     )?;
-    let columns = cursor.columns();
+    let columns = row.columns();
     assert_eq!(columns[0].name(), "RID");
-    assert_eq!(columns[0].db_type(), &oracledb::DB_TYPE_ROWID);
-    for row in cursor {
-        let row = row?;
-        let fetched_val: String = row.get(0)?;
-        let str_val: String = row.get(1)?;
-        assert_eq!(fetched_val, str_val);
-    }
+    assert_eq!(columns[0].db_type(), oracledb::DB_TYPE_ROWID);
+    let fetched_val: String = row.get(0)?;
+    let str_val: String = row.get(1)?;
+    assert_eq!(fetched_val, str_val);
     Ok(())
 }
 
@@ -115,15 +104,104 @@ fn test_1903(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         &[("value", &"rowid value"), ("out_rowid", &" ".repeat(18))],
     )?;
     assert_eq!(result.rows_affected(), 1);
-	let returned = result.returned_data()?;
-	assert_eq!(returned.len(), 1);
+    let returned = result.returned_data()?;
+    assert_eq!(returned.len(), 1);
 
-	// 1. Test scalar lookup by name:
-	let rowid: &str = returned[0].get("out_rowid")?;
-	assert!(!rowid.is_empty());
+    // 1. Test scalar lookup by name:
+    let rowid: &str = returned[0].get("out_rowid")?;
+    assert!(!rowid.is_empty());
 
-	// 2. Test scalar lookup by numeric index (positional):
-	let rowid_by_pos: &str = returned[0].get(0)?;
-	assert_eq!(rowid, rowid_by_pos);
+    // 2. Test scalar lookup by numeric index (positional):
+    let rowid_by_pos: &str = returned[0].get(0)?;
+    assert_eq!(rowid, rowid_by_pos);
+    Ok(())
+}
+
+#[rstest]
+/// Verifies an invalid ROWID is surfaced as ORA-01410 rather than a panic.
+fn test_1904(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let error = match conn.query_row(
+        "select chartorowid(:1) from dual",
+        &[&"not-an-oracle-rowid"],
+    ) {
+        Ok(_) => panic!("an invalid ROWID must be rejected"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error.kind(),
+        oracledb::ErrorKind::DbError(db_error) if db_error.code() == 1410
+    ));
+    Ok(())
+}
+
+#[rstest]
+/// Tests null UROWID and UROWID wrapper of a physical rowid.
+fn test_1905(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let row = conn.query_row("select cast(null as urowid) from dual", &[])?;
+    assert_eq!(row.columns()[0].db_type(), oracledb::DB_TYPE_UROWID);
+    assert!(row.get::<Option<String>>(0)?.is_none());
+    let row = conn.query_row("select rowid from dual", &[])?;
+    let rowid: String = row.get(0)?;
+    let row = conn.query_row("select cast(rowid as urowid) from dual", &[])?;
+    assert_eq!(row.columns()[0].db_type(), oracledb::DB_TYPE_UROWID);
+    assert_eq!(row.get::<String>(0)?, rowid);
+    Ok(())
+}
+
+#[rstest]
+/// Tests fetching UROWID
+fn test_1906(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let _guard = common::create_table_with_options(
+        &conn,
+        "test_1906",
+        r#"
+        int_val number(9) not null,
+        string_val varchar2(250) not null,
+        date_val date not null,
+        constraint test_1906_pk primary key (int_val, string_val, date_val)
+        "#,
+        "organization index",
+    )?;
+    let data = oracledb::BindParameters::Slice(&[
+        &[
+            &1,
+            &"String #1",
+            &oracledb::OracleTimestamp::new_date(2017, 4, 4),
+        ],
+        &[
+            &2,
+            &"String #2",
+            &oracledb::OracleTimestamp::new_date(2017, 4, 5),
+        ],
+        &[
+            &3,
+            &"3".repeat(249),
+            &oracledb::OracleTimestamp::new_date(2017, 4, 6),
+        ],
+        &[
+            &3,
+            &"4".repeat(250),
+            &oracledb::OracleTimestamp::new_date(2017, 4, 7),
+        ],
+    ]);
+    conn.execute_batch("insert into test_1906 values (:1, :2, :3)", data)?;
+    let cursor = conn.query(
+        r#"
+        select int_val, rowid
+        from test_1906
+        order by int_val
+        "#,
+        &[],
+    )?;
+    for row_result in cursor {
+        let row = row_result?;
+        let int_val: u8 = row.get(0)?;
+        let rowid: String = row.get(1)?;
+        let fetched_row = conn.query_row(
+            "select int_val from test_1906 where rowid = :1",
+            &[&rowid],
+        )?;
+        assert_eq!(fetched_row.get::<u8>(0)?, int_val);
+    }
     Ok(())
 }

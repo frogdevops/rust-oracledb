@@ -1,6 +1,28 @@
 # <a name="releasenotes"></a> rust-oracledb Release Notes
 
-## rust-oracledb 26.0.0-beta.3 (TBD)
+## rust-oracledb 26.0.0-beta.4 (TBD)
+
+1.  All of the database type constants have been made references in order to
+    avoid the necessity of taking a reference (or a double reference when
+    binding the type directly).
+1.  Added methods [Metadata::data_type()](crate::Metadata::data_type()),
+    [Metadata::is_sparse_vector()](crate::Metadata::is_sparse_vector()),
+    [Metadata::vector_dimensions()](crate::Metadata::vector_dimensions()) and
+    [Metadata::vector_dimensions()](crate::Metadata::vector_storage_format())
+    and the enumeration [VectorStorageFormat](crate::VectorStorageFormat).
+1.  Added method [Row::columns()](crate::Row::columns()) to provide information
+    about the columns found in that particular row.
+1.  Added struct [DbError](crate::DbError) containing information about the
+    database error which is now returned instead of `String` for
+    the [ErrorKind::DbError](crate::ErrorKind::DbError) enum variant.
+1.  Added support for fetching UROWID.
+1.  Eliminated hang when an error occurs during a DML returning statemnt
+    ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
+1.  Ensure that connections returned from a pool always start with a call
+    timeout of None.
+
+
+## rust-oracledb 26.0.0-beta.3 (September 8, 2026)
 
 1.  Added methods [Row::take()](crate::Row::take()) and
     [Row::take_array()](crate::Row::take_array()) which transfer ownership of
@@ -17,8 +39,24 @@
     columns in [Row::get()](crate::Row::get()) and
     [Row::take()](crate::Row::take())
     ([issue 12](https://github.com/oracle/rust-oracledb/issues/12)).
+1.  Added new struct [ExecBatchResult](crate::ExecBatchResult) for getting the
+    results from calling
+    [Statement::execute_batch()](crate::Statement::execute_batch()) instead of
+    using [ExecResult](crate::ExecResult). Methods
+    [ExecResult::out_bind_data()](crate::ExecResult::out_bind_data()) and
+    [ExecBatchResult::out_bind_data()](crate::ExecBatchResult::out_bind_data())
+    were added for getting [PL/SQL out bind](#batchplsql) data. The methods
+    [ExecResult::returned_data()](crate::ExecResult::returned_data()) and
+    [ExecBatchResult::returned_data()](crate::ExecBatchResult::returned_data())
+    are only used for getting [DML returning data](#dmlreturning) and they are
+    returned in a manner more conducive to further manipulation
+    ([discussion 14](https://github.com/oracle/rust-oracledb/discussions/14)).
+1.  Added method [Connection::create_lob()](crate::Connection::create_lob) for
+    creating temporary BLOB, CLOB and NCLOB values.
 1.  Added support for binding long values in any order
     ([issue 10](https://github.com/oracle/rust-oracledb/issues/10)).
+1.  Added support for binding pure OUT binds using the Oracle data type instead
+    of a dummy value. This also allows for binding of REF CURSOR out binds.
 1.  Added support for the HA readiness requirements of Oracle Database 23.26.3.
 1.  Errors that are returned now capture the backtrace and display it if
     configured with `RUST_BACKTRACE=1`, which aids in debugging.

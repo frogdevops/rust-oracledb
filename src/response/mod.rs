@@ -45,8 +45,11 @@ use crate::read_buffer::FromBuf;
 use crate::read_buffer::FromBufFallible;
 use crate::read_buffer::ReadBuffer;
 use crate::row::DbRow;
+use crate::rowid::Rowid;
+use crate::rowid::convert_logical_rowid;
 use crate::statement::CachedStatement;
 
+pub use error_info::DbError;
 use error_info::ErrorInfo;
 
 pub(crate) struct Response {
@@ -63,10 +66,16 @@ pub(crate) struct Response {
     num_columns: usize,
     call_status: u32,
     end_of_fetch: bool,
-    pub(crate) flush_out_binds: bool,
+    flush_out_binds: bool,
 }
 
 impl Response {
+    /// Takes database error information associated with the response and
+    /// transfers ownership of it to the caller.
+    fn take_db_error(&mut self) -> Option<DbError> {
+        self.error_info.as_mut().and_then(|i| i.take_db_error())
+    }
+
     /// Adds packets to the response in preparation for an attempt at
     /// deserializing the database response. Prior to Oracle Database 26ai, the
     /// database does not give any indication of when the end of a response has
@@ -86,6 +95,7 @@ impl Response {
         self.pending_values.clear();
         self.bit_vector = None;
         self.end_of_fetch = false;
+        self.flush_out_binds = false;
     }
 
     /// Records one pending value position while deserializing rows.
@@ -106,35 +116,44 @@ impl Response {
         self.call_status
     }
 
+    /// Checks to see if any error has taken place and if so, returns it. The
+    /// error "no data found" when found for a query is ignored and the end of
+    /// fetch marker is set instead.
     pub(crate) fn check_for_end_of_fetch(
         &mut self,
         statement: &CachedStatement,
     ) -> Result<(), Error> {
-        if self.get_error_num() == constants::DB_ERR_NUM_NO_DATA_FOUND
-            && statement.is_query()
-        {
-            self.end_of_fetch = true;
-            Ok(())
-        } else {
-            self.check_for_error()
-        }
-    }
-
-    pub(crate) fn check_for_error(&mut self) -> Result<(), Error> {
-        if let Some(error_info) = self.error_info.as_ref() {
-            let message = error_info.error_message();
-            if !message.is_empty() {
-                return Err(Error::db_error(message.to_string()));
+        if let Some(db_error) = self.take_db_error() {
+            if statement.is_query()
+                && db_error.code() == constants::DB_ERR_NUM_NO_DATA_FOUND
+            {
+                self.end_of_fetch = true;
+                Ok(())
+            } else {
+                Err(Error::db_error(db_error.clone()))
             }
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
-    /// Queues cursors created before response deserialization failed.
+    /// Checks to see if any error has taken place and, if so, returns it.
+    pub(crate) fn check_for_error(&mut self) -> Result<(), Error> {
+        self.take_db_error()
+            .map_or(Ok(()), |e| Err(Error::db_error(e)))
+    }
+
+    /// Queues resources created before response deserialization failed.
     pub(crate) fn cleanup_pending_values(&mut self, client: &mut Client) {
         for value in std::mem::take(&mut self.pending_values) {
-            if let Some(PendingDbValue::Cursor(statement)) = value {
-                client.return_statement(&statement);
+            match value {
+                Some(PendingDbValue::Cursor(statement)) => {
+                    client.return_statement(&statement);
+                }
+                Some(PendingDbValue::Lob(mut data)) => {
+                    client.add_lob_to_close(data.take_locator());
+                }
+                None => {}
             }
         }
     }
@@ -268,6 +287,23 @@ impl Response {
         Ok(())
     }
 
+    /// Deserializes a universal rowid from the buffer.
+    pub(crate) fn deserialize_urowid(
+        &mut self,
+    ) -> Result<Option<String>, Error> {
+        if self.read_bytes_with_length()?.is_empty() {
+            Ok(None)
+        } else {
+            let mut buf =
+                ReadBuffer::from_bytes(&self.read_bytes_with_length()?);
+            if buf.read_u8()? == 1 {
+                Ok(Some(Rowid::from_buf(&mut buf)?.to_string()))
+            } else {
+                Ok(Some(convert_logical_rowid(buf.read_remaining_bytes())))
+            }
+        }
+    }
+
     pub(crate) fn deserialize_warning(&mut self) -> Result<(), Error> {
         let error_num = self.read_ub2()?;
         let num_bytes = self.read_ub2()?;
@@ -305,22 +341,17 @@ impl Response {
         }
     }
 
+    /// Returns the cursor id returned by the error response.
     pub(crate) fn get_cursor_id(&self) -> u16 {
-        if let Some(error_info) = self.error_info.as_ref() {
-            error_info.cursor_id()
-        } else {
-            0
-        }
+        self.error_info.as_ref().map(|i| i.cursor_id()).unwrap_or(0)
     }
 
-    pub(crate) fn get_error_num(&self) -> usize {
-        if let Some(error_info) = self.error_info.as_ref() {
-            error_info.num
-        } else {
-            0
-        }
+    /// Returns whether or not the response requires out binds to be flushed.
+    pub(crate) fn get_flush_out_binds(&self) -> bool {
+        self.flush_out_binds
     }
 
+    /// Returns the last row that was fetched.
     pub(crate) fn get_last_row_fetched(&self) -> &DbRow {
         if let Some(rows) = self.rows.as_ref() {
             rows.last().unwrap()
@@ -341,11 +372,7 @@ impl Response {
 
     /// Returns the rowcount returned by the database.
     pub(crate) fn get_rowcount(&self) -> u64 {
-        if let Some(error_info) = self.error_info.as_ref() {
-            error_info.rowcount()
-        } else {
-            0
-        }
+        self.error_info.as_ref().map(|i| i.rowcount()).unwrap_or(0)
     }
 
     pub(crate) fn is_duplicate_data(&self, column_num: usize) -> bool {
@@ -537,6 +564,14 @@ impl Response {
         self.buf.read_utf8_with_length()
     }
 
+    /// Specifies that the response requires out binds to be flushed. The
+    /// packet data is cleared as well since the real response comes after the
+    /// flush out binds packet is sent!
+    pub(crate) fn set_flush_out_binds(&mut self) {
+        self.flush_out_binds = true;
+        self.packets.clear();
+    }
+
     pub(crate) fn set_prev_fetch_last_row(&mut self, last_row: Option<DbRow>) {
         self.prev_fetch_last_row = last_row;
     }
@@ -566,8 +601,10 @@ impl Response {
             other_rows.append(&mut final_rows);
             self.rows = Some(other_rows);
         }
-        if let Some(error_info) = self.error_info.as_mut() {
-            error_info.rowcount += other_resp.get_rowcount();
+        if let Some(error_info) = self.error_info.as_mut()
+            && let Some(other_error_info) = other_resp.error_info.as_mut()
+        {
+            error_info.transfer_into(other_error_info);
         }
     }
 

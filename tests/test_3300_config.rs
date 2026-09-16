@@ -196,3 +196,32 @@ fn test_3303(#[case] value: &str) -> Result<(), oracledb::Error> {
     ));
     Ok(())
 }
+
+#[test]
+/// Verifies full-descriptor defaults and the u16 port boundary.
+fn test_3304() {
+    let valid = oracledb::Config::default()
+        .set_connect_string(
+            "(DESCRIPTION=(ADDRESS=(HOST=host_3304)(PORT=65535))\
+             (CONNECT_DATA=(SERVICE_NAME=service_3304)))",
+        )
+        .unwrap();
+    assert_eq!(
+        valid.get_connect_descriptor(),
+        "(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=host_3304)(PORT=65535))\
+         (CONNECT_DATA=(SERVICE_NAME=service_3304)))"
+    );
+
+    let invalid = oracledb::Config::default().set_connect_string(
+        "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=host_3304)(PORT=65536))\
+         (CONNECT_DATA=(SERVICE_NAME=service_3304)))",
+    );
+    assert!(matches!(
+        invalid,
+        Err(error) if matches!(
+            error.kind(),
+            oracledb::ErrorKind::InvalidDescriptorNode(key, expected)
+                if key == "port" && expected == "u16"
+        )
+    ));
+}

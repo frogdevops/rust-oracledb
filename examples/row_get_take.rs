@@ -23,9 +23,9 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// plsql_in_out_binds.rs
+// row_get_take.rs
 //
-// Shows using positional and named IN/OUT binds with PL/SQL.
+// Shows the use of Row::get() and Row::take().
 //-----------------------------------------------------------------------------
 
 mod common;
@@ -34,48 +34,31 @@ fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
     let connection = oracledb::connect(config)?;
 
-    connection.execute(
-        r#"
-        create or replace procedure rso_examples_proc (
-            p1 in number,
-            p2 in out varchar2
-        ) as
-        begin
-            p2 := p2 || ' ' || p1;
-        end;
-        "#,
-        &[],
+    let _guard = common::create_table(
+        &connection,
+        "rso_examples_row_get_take",
+        "title varchar2(100)",
     )?;
+    connection.execute(
+        "insert into rso_examples_row_get_take values (:1)",
+        &[&"Learning rust-oracledb"],
+    )?;
+    connection.commit()?;
 
-    // positional bind variables
-    let data = [(440, "Gregory"), (550, "Haley"), (660, "Ian")];
-    let mut outvals = Vec::new();
+    let mut row = connection
+        .query_row("select title from rso_examples_row_get_take", &[])?;
 
-    for (p1, p2) in data {
-        let mut result = connection
-            .execute("begin rso_examples_proc(:1, :2); end;", &[&p1, &p2])?;
+    // get() reads a column value without removing it from the row
+    let title_from_get: String = row.get("TITLE")?;
+    println!("get() title: {title_from_get}");
 
-        let outval: String = result.out_bind_data().get(0)?;
+    // take() moves the column value out of the row
+    let title_from_take: String = row.take("TITLE")?;
+    println!("take() title: {title_from_take}");
 
-        outvals.push(outval);
-    }
-    println!("Positional binds: {outvals:?}");
-
-    // named bind variables
-    let data = [(440, "Julia"), (550, "Tina"), (660, "Tracy")];
-    let mut outvals = Vec::new();
-
-    for (p1, p2) in data {
-        let mut result = connection.execute_named(
-            "begin rso_examples_proc(:p1, :p2); end;",
-            &[("p1", &p1), ("p2", &p2)],
-        )?;
-
-        let outval: String = result.out_bind_data().get(0)?;
-
-        outvals.push(outval);
-    }
-    println!("Named binds: {outvals:?}");
+    // after take(), the column value in this row is null
+    let title_after_take: Option<String> = row.get("TITLE")?;
+    println!("title after take(): {title_after_take:?}");
 
     Ok(())
 }

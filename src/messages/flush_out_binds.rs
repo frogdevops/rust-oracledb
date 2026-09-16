@@ -23,37 +23,20 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// plsql_function.rs
+// flush_out_binds.rs
 //
-// Shows how to call a PL/SQL function and get its return value.
-//-----------------------------------------------------------------------------
+// Defines the structure used for sending the packet to flush out binds.
+// -----------------------------------------------------------------------------
 
-mod common;
+use crate::client::Client;
+use crate::constants;
+use crate::messages::Message;
+use crate::write_buffer::WriteBuffer;
 
-fn main() -> Result<(), oracledb::Error> {
-    let config = common::get_sample_config()?;
-    let connection = oracledb::connect(config)?;
+pub(crate) struct FlushOutBindsMessage;
 
-    connection.execute(
-        r#"
-        create or replace function rso_examples_func (
-            a_NumVal number
-        ) return number as
-        begin
-            return a_NumVal * 2;
-        end;
-        "#,
-        &[],
-    )?;
-
-    let mut result = connection.execute(
-        "begin :1 := rso_examples_func(:2); end;",
-        &[&oracledb::DB_TYPE_NUMBER, &19],
-    )?;
-
-    let return_val: i32 = result.out_bind_data().get(0)?;
-
-    println!("Return value: {return_val}");
-
-    Ok(())
+impl Message for FlushOutBindsMessage {
+    fn serialize(&self, _client: &Client, buf: &mut WriteBuffer) {
+        buf.write_u8(constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS);
+    }
 }

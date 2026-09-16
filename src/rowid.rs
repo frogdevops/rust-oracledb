@@ -32,6 +32,7 @@ use std::fmt;
 
 use crate::constants;
 use crate::error::Error;
+use crate::read_buffer::ReadBuffer;
 use crate::response::Response;
 
 #[derive(Clone, Debug)]
@@ -43,22 +44,28 @@ pub struct Rowid {
 }
 
 impl Rowid {
-    pub fn new() -> Rowid {
-        Rowid {
-            rba: 0,
-            partition_id: 0,
-            block_num: 0,
-            slot_num: 0,
-        }
-    }
-
-    pub(crate) fn deserialize(resp: &mut Response) -> Result<Rowid, Error> {
+    /// Deserializes a rowid from a database response.
+    pub(crate) fn deserialize(resp: &mut Response) -> Result<Self, Error> {
         let rba = resp.read_ub4()?;
         let partition_id = resp.read_ub2()?;
         resp.advance(1)?;
         let block_num = resp.read_ub4()?;
         let slot_num = resp.read_ub2()?;
-        Ok(Rowid {
+        Ok(Self {
+            rba,
+            partition_id,
+            block_num,
+            slot_num,
+        })
+    }
+
+    /// Returns a rowid from an encoded buffer.
+    pub(crate) fn from_buf(buf: &mut ReadBuffer) -> Result<Self, Error> {
+        let rba = buf.read_u32be()?;
+        let partition_id = buf.read_u16be()?;
+        let block_num = buf.read_u32be()?;
+        let slot_num = buf.read_u16be()?;
+        Ok(Self {
             rba,
             partition_id,
             block_num,
@@ -78,6 +85,7 @@ impl fmt::Display for Rowid {
     }
 }
 
+// base64 alphabet used for rowid conversions
 const BASE64_CHARS: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -90,4 +98,39 @@ fn convert_base64(output: &mut [u8], value: usize) {
         output[i] = BASE64_CHARS[char_index];
         value >>= 6;
     }
+}
+
+/// Converts a series of bytes making up a logical rowid into a base64 string.
+pub(crate) fn convert_logical_rowid(input: &[u8]) -> String {
+    let mut output_len: usize = (input.len() / 3) * 4 + 1;
+    match input.len() % 3 {
+        1 => output_len += 2,
+        2 => output_len += 3,
+        _ => {}
+    };
+    let mut output: Vec<u8> = vec![0u8; output_len];
+    output[0] = '*' as u8;
+    let mut input_offset: usize = 0;
+    let mut output_offset: usize = 1;
+    while input_offset < input.len() {
+        let (num_input_bytes, output_buf) = match input.len() - input_offset {
+            1 => (1, &mut output[output_offset..output_offset + 2]),
+            2 => (2, &mut output[output_offset..output_offset + 3]),
+            _ => (3, &mut output[output_offset..output_offset + 4]),
+        };
+        let mut value: usize = 0;
+        for i in 0..num_input_bytes {
+            value <<= 8;
+            value |= input[input_offset + i] as usize;
+        }
+        match output_buf.len() {
+            2 => value <<= 4,
+            3 => value <<= 2,
+            _ => {}
+        };
+        convert_base64(output_buf, value);
+        input_offset += num_input_bytes;
+        output_offset += output_buf.len();
+    }
+    String::from_utf8(output).unwrap()
 }

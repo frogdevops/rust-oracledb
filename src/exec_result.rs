@@ -25,7 +25,7 @@
 //-----------------------------------------------------------------------------
 // exec_result.rs
 //
-// Defines the structure representing execution results.
+// Defines the structures representing execution results.
 //-----------------------------------------------------------------------------
 
 use std::sync::Arc;
@@ -34,6 +34,7 @@ use crate::error::Error;
 use crate::metadata::Metadata;
 use crate::response::Response;
 use crate::row::Row;
+use crate::statement::CachedStatement;
 use crate::transpose::{RawColumnarData, TransposeData};
 
 /// Represents the result returned by the database when calling
@@ -45,22 +46,13 @@ pub struct ExecResult {
     rows_affected: u64,
 }
 
-/// Represents the result returned by the database when calling
-/// [Connection::execute_batch()](`crate::Connection::execute_batch()`) or
-/// [Statement::execute_batch()](`crate::Statement::execute_batch()`).
-pub struct ExecBatchResult {
-    column_info: Arc<Vec<Metadata>>,
-    returned_data: Option<Vec<RawColumnarData>>,
-    rows_affected: u64,
-}
-
 impl ExecResult {
     pub(crate) fn new(
-        column_info: &[Metadata],
+        statement: &CachedStatement,
         resp: &mut Response,
     ) -> ExecResult {
         ExecResult {
-            column_info: Arc::new(column_info.to_vec()),
+            column_info: Arc::new(statement.out_metadata().to_vec()),
             returned_data: resp
                 .take_rows()
                 .and_then(|mut v| v.pop())
@@ -101,18 +93,36 @@ impl ExecResult {
             ))),
         }
     }
+
+    /// Returns data returned by the database as OUT variables for PL/SQL. This
+    /// transfers ownership of the data to the caller.
+    pub fn out_bind_data(&mut self) -> Row {
+        self.returned_row().unwrap_or_else(|_| Row::new_empty())
+    }
+}
+
+/// Represents the result returned by the database when calling
+/// [Connection::execute_batch()](`crate::Connection::execute_batch()`) or
+/// [Statement::execute_batch()](`crate::Statement::execute_batch()`).
+pub struct ExecBatchResult {
+    column_info: Arc<Vec<Metadata>>,
+    returned_data: Option<Vec<RawColumnarData>>,
+    num_execs: usize,
+    rows_affected: u64,
 }
 
 impl ExecBatchResult {
     pub(crate) fn new(
-        column_info: &[Metadata],
+        statement: &CachedStatement,
+        num_execs: usize,
         resp: &mut Response,
     ) -> ExecBatchResult {
         ExecBatchResult {
-            column_info: Arc::new(column_info.to_vec()),
+            column_info: Arc::new(statement.out_metadata().to_vec()),
             returned_data: resp
                 .take_rows()
                 .map(|rows| rows.into_iter().map(RawColumnarData::new).collect()),
+            num_execs,
             rows_affected: resp.get_rowcount(),
         }
     }
@@ -131,5 +141,29 @@ impl ExecBatchResult {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    /// Returns data returned by the database as OUT variables in PL/SQL. This
+    /// transfers ownership of the returned data to the caller.
+    pub fn out_bind_data(&mut self) -> Vec<Row> {
+        self.returned_data()
+            .ok()
+            .map(|batches| {
+                batches
+                    .into_iter()
+                    .map(|mut rows| {
+                        if rows.len() == 1 {
+                            rows.pop().unwrap()
+                        } else {
+                            Row::new_empty()
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                std::iter::repeat_with(Row::new_empty)
+                    .take(self.num_execs)
+                    .collect()
+            })
     }
 }
