@@ -716,7 +716,7 @@ impl Client {
                     constants::TTC_SESSION_STATE_REQUEST_END;
             }
         }
-        if self.transaction_in_progress || self.pending_session_state != 0 {
+        if self.transaction_in_progress {
             self.process_message(&mut RollbackMessage::new())?;
             self.transaction_in_progress = false;
             self.pending_session_state = 0;

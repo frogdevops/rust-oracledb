@@ -70,9 +70,10 @@ impl Connection {
     /// connection is dropped.
     pub fn close(&mut self) -> Result<(), Error> {
         if let Some(pool_contents_ref) = self.pool_contents_ref.take() {
+            let mut conn_impl = self.conn_impl.take().unwrap();
+            let result = conn_impl.set_returned_to_pool();
             let mut pool_contents = pool_contents_ref.lock().unwrap();
-            let conn_impl = self.conn_impl.take().unwrap();
-            pool_contents.return_connection(conn_impl)
+            pool_contents.return_connection(conn_impl, result)
         } else if let Some(mut conn_impl) = self.conn_impl.take() {
             conn_impl.close()
         } else {
