@@ -664,23 +664,37 @@ impl Client {
         }
     }
 
-    /// Ends the current request against the database.This clears any end user
+    /// Begins a new request against the database when a connection is checked
+    /// out of the pool.
+    pub(crate) fn begin_request(&mut self) {
+        if !self.pool_id.is_empty() && self.caps.supports_request_boundaries() {
+            self.pending_session_state =
+                constants::TTC_SESSION_STATE_REQUEST_BEGIN;
+            self.in_request = true;
+        }
+    }
+
+    /// Ends the current request against the database. This clears any end user
     /// security context and warnings, rolls back any open transactions and
     /// releases any session to the DRCP pool, if applicable.
     pub(crate) fn end_request(&mut self) -> Result<(), Error> {
         self.security_context = None;
         self.last_warning = None;
         if self.in_request {
-            if self.pending_session_state != 0 {
-                self.in_request = false;
+            self.in_request = false;
+            if self.pending_session_state
+                == constants::TTC_SESSION_STATE_REQUEST_BEGIN
+            {
+                self.pending_session_state = 0;
             } else {
                 self.pending_session_state =
                     constants::TTC_SESSION_STATE_REQUEST_END;
             }
         }
-        if self.transaction_in_progress {
+        if self.transaction_in_progress || self.pending_session_state != 0 {
             self.process_message(&mut RollbackMessage::new())?;
-	        self.transaction_in_progress = false;
+            self.transaction_in_progress = false;
+            self.pending_session_state = 0;
         }
         Ok(())
     }
@@ -776,12 +790,6 @@ impl Client {
         }
         if self.caps.supports_ha_readiness() {
             self.pending_ha_readiness = true;
-        }
-        if !self.pool_id.is_empty() && self.caps.supports_request_boundaries()
-        {
-            self.pending_session_state =
-                constants::TTC_SESSION_STATE_REQUEST_BEGIN;
-            self.in_request = true;
         }
         Ok(db_info)
     }

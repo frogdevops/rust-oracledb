@@ -161,8 +161,11 @@ impl PoolContents {
         {
             if let Some(conn_impl) = self.get_connection() {
                 self.satisfy_request(Ok(conn_impl));
+            } else {
+                break;
             }
         }
+        self.notify_manager();
     }
 
     /// Sends a request to the manager.

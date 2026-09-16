@@ -89,7 +89,8 @@ impl Pool {
             PoolAcquireResponse::Connection(result) => result,
             PoolAcquireResponse::Wait(channel) => channel.recv().unwrap(),
         };
-        conn_impl_result.map(|conn_impl| {
+        conn_impl_result.map(|mut conn_impl| {
+            conn_impl.begin_request();
             Connection::create_pooled(conn_impl, &self.contents_ref)
         })
     }

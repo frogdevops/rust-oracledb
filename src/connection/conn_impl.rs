@@ -130,6 +130,11 @@ impl ConnImpl {
             .set_end_user_security_context(context)
     }
 
+    /// Begins a new request on the connection when acquired from the pool.
+    pub(crate) fn begin_request(&mut self) {
+        self.client_ref.lock().unwrap().begin_request();
+    }
+
     /// Sets the returned to pool instant which is used in pool management.
     pub(crate) fn set_returned_to_pool(&mut self) -> Result<(), Error> {
         self.client_ref.lock().unwrap().end_request()?;

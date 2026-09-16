@@ -140,3 +140,33 @@ fn test_2904() -> Result<(), oracledb::Error> {
     assert_eq!(count, 0, "pooled release leaked an open transaction");
     Ok(())
 }
+
+#[test]
+/// Tests high-concurrency acquire and release across multiple threads.
+fn test_2906() -> Result<(), oracledb::Error> {
+    use std::sync::Arc;
+    use std::thread;
+
+    let pool = Arc::new(oracledb::create_pool(pool_config(1, 4, 1)?)?);
+    let mut handles = Vec::new();
+
+    for _ in 0..20 {
+        let pool_clone = Arc::clone(&pool);
+        handles.push(thread::spawn(move || -> Result<(), oracledb::Error> {
+            for _ in 0..10 {
+                let conn = pool_clone.acquire()?;
+                let row = conn.query_row("select 1 from dual", &[])?;
+                let val: i32 = row.get(0)?;
+                assert_eq!(val, 1);
+            }
+            Ok(())
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap()?;
+    }
+
+    assert_eq!(pool.busy_count()?, 0);
+    Ok(())
+}
