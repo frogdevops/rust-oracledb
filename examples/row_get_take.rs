@@ -25,7 +25,7 @@
 //-----------------------------------------------------------------------------
 // row_get_take.rs
 //
-// Shows the use of Row::get() and Row::take().
+// Shows the use of Row::columns(), Row::get() and Row::take().
 //-----------------------------------------------------------------------------
 
 mod common;
@@ -47,6 +47,11 @@ fn main() -> Result<(), oracledb::Error> {
 
     let mut row = connection
         .query_row("select title from rso_examples_row_get_take", &[])?;
+
+    // columns() returns metadata for the columns in the row
+    for column in row.columns() {
+        println!("column: {} {}", column.name(), column.data_type());
+    }
 
     // get() reads a column value without removing it from the row
     let title_from_get: String = row.get("TITLE")?;

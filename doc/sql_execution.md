@@ -172,6 +172,22 @@ the row is an array. They behave like `get()` and `take()`: `get_array()` reads
 the array without changing the row, while `take_array()` moves the array out of
 the row.
 
+Column metadata for a row can be inspected with
+[Row::columns()](crate::Row::columns()). This returns metadata for the columns
+in that row, including the column name and database type information. For example:
+
+```rust
+for column in row.columns() {
+    println!("column: {} {}", column.name(), column.data_type());
+}
+```
+
+This prints:
+
+```text
+column: TITLE VARCHAR2(100)
+```
+
 ### <a name="defaultfetchtypes"></a> 3.1.4 Fetch Data Types
 
 The following table lists Oracle Database types that rust-oracledb can fetch,

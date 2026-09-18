@@ -34,7 +34,7 @@ then the following Rust code can be used to call it:
 ```rust
 let mut result = connection.execute(
     "begin myproc(:1, :2); end;",
-    &[&123, &0],
+    &[&123, &oracledb::DB_TYPE_NUMBER],
 )?;
 
 let out_val: i32 = result.out_bind_data().get(0)?;
@@ -42,7 +42,8 @@ let out_val: i32 = result.out_bind_data().get(0)?;
 println!("{out_val}"); // will print 246
 ```
 
-The OUT bind value is returned from
+OUT bind variables are bound by passing the desired Oracle Database type, such
+as ``oracledb::DB_TYPE_NUMBER``. The OUT bind value is returned from
 [ExecResult::out_bind_data()](crate::ExecResult::out_bind_data).
 
 See [Using Bind Variables](#bind) for information on binding.
@@ -71,11 +72,14 @@ then the following Rust code can be used to call it:
 ```rust
 use oracledb::OracleTimestamp;
 
-let date_hint = OracleTimestamp::new_date(1970, 1, 1);
-
 let mut result = connection.execute(
     "begin :1 := myfunc(:2, :3, :4); end;",
-    &[&0, &"a string", &15, &date_hint],
+    &[
+        &oracledb::DB_TYPE_NUMBER,
+        &"a string",
+        &15,
+        &oracledb::DB_TYPE_DATE,
+    ],
 )?;
 
 let out_bind_data = result.out_bind_data();
@@ -83,8 +87,8 @@ let out_bind_data = result.out_bind_data();
 let return_val: i32 = out_bind_data.get(0)?;
 let out_date: OracleTimestamp = out_bind_data.get(1)?;
 
-println!("{return_val}");
-println!("{out_date}");
+println!("Return value: {return_val}");
+println!("OUT date: {out_date}");
 ```
 
 This prints the following output:
@@ -109,7 +113,7 @@ let mut result = connection.execute_named(
     "#,
     &[
         ("in_val", &"A sample string"),
-        ("out_val", &0),
+        ("out_val", &oracledb::DB_TYPE_NUMBER),
     ],
 )?;
 
@@ -120,7 +124,55 @@ println!("{out_val}"); // will print 15
 
 See [Using Bind Variables](#bind) for information on binding.
 
-## <a name="plsqlnull"></a> 4.4 Passing NULL values to PL/SQL
+## <a name="refcursor"></a> 4.4 REF CURSORs
+
+PL/SQL procedures can return query results through REF CURSOR OUT parameters.
+Bind the REF CURSOR parameter with
+[oracledb::DB_TYPE_CURSOR](crate::DB_TYPE_CURSOR), then take the returned
+[Cursor](crate::Cursor) from `ExecResult::out_bind_data()`.
+
+For example, if a procedure returns a `SYS_REFCURSOR`:
+
+```sql
+create or replace procedure myrefcursor (
+    a_NumRows number,
+    a_Cursor out sys_refcursor
+) as
+begin
+    open a_Cursor for
+        select level * 100
+        from dual
+        connect by level <= a_NumRows;
+end;
+```
+
+then the following Rust code can be used to call it:
+
+```rust
+let mut result = connection.execute(
+    "begin myrefcursor(:1, :2); end;",
+    &[&3, &oracledb::DB_TYPE_CURSOR],
+)?;
+
+let cursor: oracledb::Cursor = result.out_bind_data().take(0)?;
+
+for row_result in cursor {
+    let row = row_result?;
+    let value: i32 = row.get(0)?;
+
+    println!("{value}");
+}
+```
+
+This prints the following output:
+
+```text
+100
+200
+300
+```
+
+## <a name="plsqlnull"></a> 4.5 Passing NULL values to PL/SQL
 
 Oracle Database requires a type, even for null values. In rust-oracledb,
 scalar NULL values can be bound by using `Option<T>`, where `T` determines
@@ -135,7 +187,7 @@ connection.execute(
 )?;
 ```
 
-## <a name="storedprocpkg"></a> 4.5 Creating Stored Procedures and Packages
+## <a name="storedprocpkg"></a> 4.6 Creating Stored Procedures and Packages
 
 To create PL/SQL stored procedures and packages, use
 [Connection::execute()](crate::Connection::execute) with a CREATE command.
@@ -153,7 +205,7 @@ connection.execute(
 )?;
 ```
 
-### <a name="plsqlwarning"></a> 4.5.1 PL/SQL Compilation Warnings
+### <a name="plsqlwarning"></a> 4.6.1 PL/SQL Compilation Warnings
 
 When creating PL/SQL procedures, functions, or types in rust-oracledb, the
 statement may succeed without returning an error, but Oracle Database may still
@@ -208,7 +260,7 @@ Line 3, position 13: PLS-00201: identifier 'INVALID_STATEMENT' must be declared
 Line 3, position 13: PL/SQL: Statement ignored
 ```
 
-## <a name="dbmsoutput"></a> 4.6 Using DBMS_OUTPUT
+## <a name="dbmsoutput"></a> 4.7 Using DBMS_OUTPUT
 
 The standard way to print output from PL/SQL is with the [DBMS_OUTPUT] package.
 
@@ -276,7 +328,7 @@ Hello from PL/SQL
 This line was buffered by DBMS_OUTPUT
 ```
 
-## <a name="ebr"></a> 4.7 Edition-Based Redefinition (EBR)
+## <a name="ebr"></a> 4.8 Edition-Based Redefinition (EBR)
 
 Oracle Database's [Edition-Based Redefinition] feature enables upgrading of the
 database component of an application while it is in use, thereby minimizing or

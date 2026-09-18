@@ -114,8 +114,10 @@ For batch execution, `out_bind_data()` returns a `Vec<Row>`. Each row contains
 the output bind values for one execution, in the same order as the input bind
 values.
 
-For an OUT parameter, pass a value of the desired Rust type as a placeholder.
-The placeholder is used to determine the bind type and buffer metadata.
+For an OUT parameter, pass the desired Oracle Database type, such as
+[oracledb::DB_TYPE_NUMBER](crate::DB_TYPE_NUMBER). The database type is used to
+determine the bind type and buffer metadata. For IN/OUT parameters, pass the
+initial Rust value.
 
 ```sql
 create or replace procedure myproc(p1 in number, p2 out number) as
@@ -130,7 +132,7 @@ This can be called in rust-oracledb using positional binds like:
 for p1 in [100, 200, 300] {
     let mut result = connection.execute(
         "begin myproc(:1, :2); end;",
-        &[&p1, &0],
+        &[&p1, &oracledb::DB_TYPE_NUMBER],
     )?;
 
     let p2: i32 = result.out_bind_data().get(0)?;
@@ -157,7 +159,7 @@ for p1 in data {
         "begin myproc(:p1, :p2); end;",
         &[
             ("p1", &p1),
-            ("p2", &0),
+            ("p2", &oracledb::DB_TYPE_NUMBER),
         ],
     )?;
 
@@ -183,9 +185,9 @@ one row for each execution.
 
 ```rust
 let params = oracledb::BindParameters::Slice(&[
-    &[&100, &0],
-    &[&200, &0],
-    &[&300, &0],
+    &[&100, &oracledb::DB_TYPE_NUMBER],
+    &[&200, &oracledb::DB_TYPE_NUMBER],
+    &[&300, &oracledb::DB_TYPE_NUMBER],
 ]);
 
 let mut result = connection.execute_batch(
@@ -331,11 +333,11 @@ let parent_ids_to_delete = [20, 30, 50];
 
 for parent_id in parent_ids_to_delete {
     let mut result = connection.execute(
-        "delete from ChildTable
-         where ParentId = :1
-         returning ChildId into :2",
-        &[&parent_id, &0],
-    )?;
+    "delete from ChildTable
+     where ParentId = :1
+     returning ChildId into :2",
+    &[&parent_id, &oracledb::DB_TYPE_NUMBER],
+)?;
 
     let rows = result.returned_data();
 
@@ -367,8 +369,8 @@ Child IDs deleted for parent ID 30 are []
 Child IDs deleted for parent ID 50 are [4, 5]
 ```
 
-The "&0" bind is a type hint for the returned ChildId values. The actual
-returned values are read from `result.returned_data()`.
+The `DB_TYPE_NUMBER` bind is a type hint for the returned ChildId values. The
+actual returned values are read from `result.returned_data()`.
 
 DML RETURNING can also be used with
 [Connection::execute_batch()](crate::Connection::execute_batch). The returned
@@ -387,9 +389,9 @@ the returned rows grouped by batch execution.
 let parent_ids = [20, 30, 50];
 
 let params = oracledb::BindParameters::Slice(&[
-    &[&20, &0],
-    &[&30, &0],
-    &[&50, &0],
+    &[&20, &oracledb::DB_TYPE_NUMBER],
+    &[&30, &oracledb::DB_TYPE_NUMBER],
+    &[&50, &oracledb::DB_TYPE_NUMBER],
 ]);
 
 let mut result = connection.execute_batch(

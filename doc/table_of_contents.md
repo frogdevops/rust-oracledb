@@ -103,14 +103,16 @@ instead of the mouse.
 
    4.3 [Anonymous PL/SQL Blocks](#anonplsql)
 
-   4.4 [Passing NULL values to PL/SQL](#plsqlnull)
+   4.4 [REF CURSORs](#refcursor)
 
-   4.5 [Creating Stored Procedures and Packages](#storedprocpkg)
-   - 4.5.1 [PL/SQL Compilation Warnings](#plsqlwarning)
+   4.5 [Passing NULL values to PL/SQL](#plsqlnull)
 
-   4.6 [Using DBMS_OUTPUT](#dbmsoutput)
+   4.6 [Creating Stored Procedures and Packages](#storedprocpkg)
+   - 4.6.1 [PL/SQL Compilation Warnings](#plsqlwarning)
 
-   4.7 [Edition-Based Redefinition (EBR)](#ebr)
+   4.7 [Using DBMS_OUTPUT](#dbmsoutput)
+
+   4.8 [Edition-Based Redefinition (EBR)](#ebr)
 
 5. [Using Bind Variables](#bind)
 
@@ -122,18 +124,20 @@ instead of the mouse.
 
    5.3 [Bind Direction](#binddir)
 
-   5.4 [Binding Null Values](#bindnull)
+   5.4 [Binding OUT Values by Database Type](#outbindtypes)
 
-   5.5 [Binding ROWID Values](#bindrowid)
+   5.5 [Binding Null Values](#bindnull)
 
-   5.6 [Binding UROWID Values](#bindurowid)
+   5.6 [Binding ROWID Values](#bindrowid)
 
-   5.7 [DML RETURNING Bind Variables](#dml-returning-bind)
+   5.7 [Binding UROWID Values](#bindurowid)
 
-   5.8 [Binding Multiple Values to a SQL WHERE IN Clause](#multiplevalueswherein)
-   - 5.8.1 [Binding a Large Number of Items in an IN List](#bindinlist)
+   5.8 [DML RETURNING Bind Variables](#dml-returning-bind)
 
-   5.9 [Binding Column and Table Names](#bindcoltblnames)
+   5.9 [Binding Multiple Values to a SQL WHERE IN Clause](#multiplevalueswherein)
+   - 5.9.1 [Binding a Large Number of Items in an IN List](#bindinlist)
+
+   5.10 [Binding Column and Table Names](#bindcoltblnames)
 
 6. [Executing Batch Statements and Bulk Loading](#batchstmnt)
 
