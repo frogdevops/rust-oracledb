@@ -48,7 +48,6 @@ use std::cmp::min;
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::net::Shutdown;
 use std::net::TcpStream;
 use std::path::Path;
 use std::sync::Arc;
@@ -59,9 +58,107 @@ use crate::constants;
 use crate::error::Error;
 use crate::packet::Packet;
 
-pub struct Transport {
-    stream: Option<TcpStream>,
-    tls_stream: Option<TlsStream<TlsClientConnection, TcpStream>>,
+enum LowLevelTransport {
+    Tcp(TcpStream),
+    Tls(Box<TlsStream<TlsClientConnection, TcpStream>>),
+}
+
+impl LowLevelTransport {
+    /// Flushes all data to the low level transport.
+    fn flush(&mut self) -> Result<(), Error> {
+        match self {
+            Self::Tcp(s) => Ok(s.flush()?),
+            Self::Tls(s) => Ok(s.flush()?),
+        }
+    }
+
+    /// Returns the read timeout associated with the low level transport.
+    pub(crate) fn get_read_timeout(
+        &self,
+    ) -> Result<Option<std::time::Duration>, Error> {
+        match self {
+            Self::Tcp(s) => Ok(s.read_timeout()?),
+            Self::Tls(s) => Ok(s.sock.read_timeout()?),
+        }
+    }
+
+    /// Neogtiate TLS
+    fn negotiate_tls(
+        self,
+        server_name: &str,
+        config: &Config,
+    ) -> Result<Self, Error> {
+        let mut resolver = CustomClientCertResolver::new();
+        if let Some(wallet_location) = config.wallet_location() {
+            resolver.populate(
+                wallet_location,
+                config.get_wallet_password_bytes(),
+            )?;
+        }
+        let tls_config = resolver.get_tls_config();
+        let tls_server_name: rustls::pki_types::ServerName =
+            server_name.to_string().try_into().unwrap();
+        let conn = rustls::ClientConnection::new(
+            Arc::new(tls_config),
+            tls_server_name,
+        )?;
+        let stream = match self {
+            Self::Tcp(stream) => stream,
+            Self::Tls(orig_stream) => {
+                let (_, stream) = orig_stream.into_parts();
+                stream
+            }
+        };
+        let tls_stream = rustls::StreamOwned::new(conn, stream);
+        Ok(Self::Tls(Box::new(tls_stream)))
+    }
+
+    /// Reads bytes from the low level transport and returns the number of
+    /// bytes read.
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        match self {
+            Self::Tcp(s) => Ok(s.read(buf)?),
+            Self::Tls(s) => Ok(s.read(buf)?),
+        }
+    }
+
+    /// Sets the read timeout for the low level transport.
+    pub(crate) fn set_read_timeout(
+        &self,
+        duration: Option<std::time::Duration>,
+    ) -> Result<(), Error> {
+        let stream = match self {
+            Self::Tcp(s) => s,
+            Self::Tls(s) => &s.sock,
+        };
+        Ok(stream.set_read_timeout(duration)?)
+    }
+
+    /// Shuts down the low-level transport.
+    fn shutdown(&mut self) -> Result<(), Error> {
+        let stream = match self {
+            Self::Tcp(s) => s,
+            Self::Tls(s) => {
+                s.conn.send_close_notify();
+                s.flush()?;
+                &mut s.sock
+            }
+        };
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        Ok(())
+    }
+
+    /// Writes bytes to the low level transport.
+    fn write_all(&mut self, data: &[u8]) -> Result<(), Error> {
+        match self {
+            Self::Tcp(s) => Ok(s.write_all(data)?),
+            Self::Tls(s) => Ok(s.write_all(data)?),
+        }
+    }
+}
+
+pub(crate) struct Transport {
+    low_level_transport: Option<LowLevelTransport>,
     socket_num: String,
     max_packet_size: usize,
     read_buf: Vec<u8>,
@@ -194,30 +291,25 @@ impl Transport {
     /// number of bytes read is returned.
     fn read_packet(&mut self) -> Result<usize, Error> {
         let buf = &mut self.read_buf[self.residual_bytes..];
-        if let Some(stream) = self.tls_stream.as_mut() {
-            Ok(stream.read(buf)?)
-        } else if let Some(stream) = self.stream.as_mut() {
-            Ok(stream.read(buf)?)
-        } else {
-            Err(Error::not_connected())
-        }
+        self.low_level_transport
+            .as_mut()
+            .ok_or_else(Error::not_connected)
+            .and_then(|t| t.read(buf))
     }
 
     /// Writes a packet to the stream, if the stream is currently connected.
     fn write_packet(&mut self) -> Result<(), Error> {
-        let data = &self.write_buf[..];
-        if self.stream.is_none() && self.tls_stream.is_none() {
+        if self.low_level_transport.is_none() {
             return Err(Error::not_connected());
         }
+        let data = &self.write_buf[..];
         if self.print_packets {
             self.op_num += 1;
             let header = self.get_op_header("Sending packet");
             print_packet(&header, data);
         }
-        if let Some(stream) = self.tls_stream.as_mut() {
-            stream.write_all(data)?;
-        } else if let Some(stream) = self.stream.as_mut() {
-            stream.write_all(data)?;
+        if let Some(t) = self.low_level_transport.as_mut() {
+            t.write_all(data)?;
         }
         Ok(())
     }
@@ -229,10 +321,10 @@ impl Transport {
             let header = self.get_op_header("Disconnecting transport");
             println!("{}\n", header);
         }
-        let stream = self.stream.as_mut().ok_or_else(Error::not_connected)?;
-        let _ = stream.shutdown(Shutdown::Both);
-        self.stream = None;
-        Ok(())
+        self.low_level_transport
+            .take()
+            .ok_or_else(Error::not_connected)
+            .and_then(|mut t| t.shutdown())
     }
 
     /// Establishes a TCP connection to the database.
@@ -245,7 +337,7 @@ impl Transport {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(None)?;
         self.socket_num = get_socket_num(&stream);
-        self.stream = Some(stream);
+        self.low_level_transport = Some(LowLevelTransport::Tcp(stream));
         if address.protocol() == "tcps" {
             self.negotiate_tls(address.host(), config)?;
         }
@@ -256,8 +348,10 @@ impl Transport {
     pub(crate) fn get_read_timeout(
         &self,
     ) -> Result<Option<std::time::Duration>, Error> {
-        let stream = self.stream.as_ref().ok_or_else(Error::not_connected)?;
-        Ok(stream.read_timeout()?)
+        self.low_level_transport
+            .as_ref()
+            .ok_or_else(Error::not_connected)
+            .and_then(|t| t.get_read_timeout())
     }
 
     /// Negotiates TLS on the connection.
@@ -271,28 +365,16 @@ impl Transport {
             let header = self.get_op_header("Negotiate TLS");
             println!("{}\n", header);
         }
-        let mut resolver = CustomClientCertResolver::new();
-        if let Some(wallet_location) = config.wallet_location() {
-            resolver.populate(
-                wallet_location,
-                config.get_wallet_password_bytes(),
-            )?;
-        }
-        let config = resolver.get_tls_config();
-        let tls_server_name: rustls::pki_types::ServerName =
-            server_name.to_string().try_into().unwrap();
-        let conn =
-            rustls::ClientConnection::new(Arc::new(config), tls_server_name)?;
-        let stream = self.stream.as_ref().unwrap().try_clone()?;
-        self.tls_stream = Some(rustls::StreamOwned::new(conn, stream));
+        let low_level_transport = self.low_level_transport.take().unwrap();
+        self.low_level_transport =
+            Some(low_level_transport.negotiate_tls(server_name, config)?);
         Ok(())
     }
 
-    /// Establishes a TCP connection to the database.
+    /// Creates a new empty transport.
     pub(crate) fn new(max_packet_size: usize) -> Self {
-        Transport {
-            stream: None,
-            tls_stream: None,
+        Self {
+            low_level_transport: None,
             socket_num: String::new(),
             max_packet_size,
             read_buf: vec![0; max_packet_size],
@@ -320,8 +402,7 @@ impl Transport {
             }
             let num_bytes = self.read_packet()?;
             if num_bytes == 0 {
-                self.stream = None;
-                self.tls_stream = None;
+                self.low_level_transport = None;
                 break;
             }
             self.residual_bytes += num_bytes;
@@ -369,15 +450,10 @@ impl Transport {
                 break;
             }
         }
-        if let Some(stream) = self.tls_stream.as_mut() {
-            stream.flush()?;
-            Ok(())
-        } else if let Some(stream) = self.stream.as_mut() {
-            stream.flush()?;
-            Ok(())
-        } else {
-            Err(Error::not_connected())
-        }
+        self.low_level_transport
+            .as_mut()
+            .ok_or_else(Error::not_connected)
+            .and_then(|t| t.flush())
     }
 
     /// Sets the read timeout for the transport.
@@ -385,8 +461,10 @@ impl Transport {
         &self,
         duration: Option<std::time::Duration>,
     ) -> Result<(), Error> {
-        let stream = self.stream.as_ref().ok_or_else(Error::not_connected)?;
-        Ok(stream.set_read_timeout(duration)?)
+        self.low_level_transport
+            .as_ref()
+            .ok_or_else(Error::not_connected)
+            .and_then(|t| t.set_read_timeout(duration))
     }
 
     /// Indicates that the full packet size should be used for all subsequent
@@ -397,7 +475,7 @@ impl Transport {
 
     /// Returns whether this transport is currently wrapped in TLS.
     pub(crate) fn uses_tls(&self) -> bool {
-        self.tls_stream.is_some()
+        matches!(self.low_level_transport, Some(LowLevelTransport::Tls(_)))
     }
 }
 
