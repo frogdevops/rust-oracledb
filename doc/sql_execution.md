@@ -252,7 +252,7 @@ using:
 
 ```rust
 let myoffset: i32 = 0;       # do not skip any rows (start at row 1)
-let mymaxnumrows: i32 = 20   # get 20 rows
+let mymaxnumrows: u32 = 20   # get 20 rows
 
 let sql = r#"
         SELECT last_name
@@ -266,11 +266,11 @@ let mut stmt = conn
         .fetch_array_size(mymaxnumrows as usize)
         .build()?;
 
-for row_result in stmt.query_as_named::<String>(&[
+for row_result in stmt.query_named(&[
         ("offset", &myoffset),
         ("maxnumrows", &mymaxnumrows),
     ])? {
-        let last_name = row_result?;
+        let last_name: &str = row_result?.get(0)?;
         println!("{last_name}");
     }
 ```
@@ -317,7 +317,122 @@ Note that the commit occurs on the connection.
 See [Managing Transactions](#txnmgmnt) for best practices on committing and
 rolling back data changes.
 
-## <a name="validatingsql"></a> 3.3 Dynamic SQL Construction and Validation
+## <a name="statementbuilding"></a> 3.3 Building and Inspecting Statements
+
+The methods [Connection::query()](crate::Connection::query),
+[Connection::query_row()](crate::Connection::query_row),
+[Connection::execute()](crate::Connection::execute), and
+[Connection::execute_batch()](crate::Connection::execute_batch) are
+available for ordinary statement execution. These methods build statements
+using the default statement options.
+
+Use [Connection::statement()](crate::Connection::statement) when you need to
+configure statement-specific options or inspect a statement before executing it.
+The method returns a [StatementBuilder](crate::StatementBuilder). After
+configuring the builder, call
+[StatementBuilder::build()](crate::StatementBuilder::build)
+to create a [Statement](crate::Statement).
+
+For example:
+
+```rust
+let mut statement = connection
+    .statement("select user from dual")?
+    .prefetch_rows(10)
+    .fetch_array_size(100)
+    .build()?;
+
+let row = statement.query_row(&[])?;
+let user: String = row.get(0)?;
+println!("Connected user is {user}");
+```
+
+Statements are cached by default. To prevent a statement from being cached,
+call
+[StatementBuilder::exclude_from_cache()](crate::StatementBuilder::exclude_from_cache)
+before calling [StatementBuilder::build()](crate::StatementBuilder::build):
+
+```rust
+let row = connection
+    .statement("select user from dual")?
+    .exclude_from_cache()
+    .build()?
+    .query_row(&[])?;
+
+let user: String = row.get(0)?;
+```
+
+The statement builder provides the following options:
+
+- [StatementBuilder::fetch_array_size()](crate::StatementBuilder::fetch_array_size)
+  specifies the number of rows fetched during each subsequent fetch operation
+  after the statement is initially executed.
+- [StatementBuilder::prefetch_rows()](crate::StatementBuilder::prefetch_rows)
+  specifies the number of rows fetched during the initial execution of a
+  query.
+- [StatementBuilder::fetch_lobs()](crate::StatementBuilder::fetch_lobs)
+  specifies that LOB values should be fetched as LOB locators.
+- [StatementBuilder::exclude_from_cache()](crate::StatementBuilder::exclude_from_cache)
+  prevents the statement from being cached.
+
+### <a name="statementinspecting"></a> 3.3.1 Inspecting a Statement
+
+A built statement can be inspected before execution. The
+[Statement::sql()](crate::Statement::sql) method returns the SQL text, while
+[Statement::bind_names()](crate::Statement::bind_names) returns the bind names
+in the statement. If the SQL statement does not contain any bind variables,
+[Statement::bind_names()](crate::Statement::bind_names) returns an empty
+slice.
+
+The following methods identify the type of statement:
+
+- [Statement::is_query()](crate::Statement::is_query)
+- [Statement::is_dml()](crate::Statement::is_dml)
+- [Statement::is_dml_returning()](crate::Statement::is_dml_returning)
+- [Statement::is_ddl()](crate::Statement::is_ddl)
+- [Statement::is_plsql()](crate::Statement::is_plsql)
+
+For example:
+
+```rust
+let sql = "select user from dual where user = :user";
+let mut statement = connection.statement(sql)?.build()?;
+
+println!("SQL: {}", statement.sql());
+println!("Bind names: {:?}", statement.bind_names());
+
+if statement.is_query() {
+    println!("The statement is a query");
+}
+```
+
+A statement may not be fully parsed by the database immediately after it is
+built. Use [Statement::is_fully_parsed()](crate::Statement::is_fully_parsed)
+to check its state. Calling
+[Statement::ensure_fully_parsed()](crate::Statement::ensure_fully_parsed)
+causes the database to fully parse the statement when necessary and may
+perform a database round-trip. DDL statements may also be executed as part of
+this operation.
+
+After a statement has been fully parsed,
+[Statement::out_metadata()](crate::Statement::out_metadata) returns metadata
+for the data produced by the statement. This includes query columns, OUT bind
+values from PL/SQL statements, and returned values from DML RETURNING
+statements.
+
+```rust
+let mut statement = connection
+    .statement("select user from dual")?
+    .build()?;
+
+statement.ensure_fully_parsed()?;
+
+for metadata in statement.out_metadata() {
+    println!("Column type: {}", metadata.db_type());
+}
+```
+
+## <a name="validatingsql"></a> 3.4 Dynamic SQL Construction and Validation
 
 When dynamically building SQL statements, you can use the methods
 [oracledb::enquote_name()](crate::utils::enquote_name()),
@@ -330,7 +445,7 @@ prevent SQL injection when processing user input.
 or interpolate data values into SQL text. Instead, use bind variables for all
 data values. See [Using bind variables](#bind).
 
-### <a name="quotenames"></a> 3.3.1 Quoting SQL Identifiers
+### <a name="quotenames"></a> 3.4.1 Quoting SQL Identifiers
 
 [oracledb::enquote_name()](crate::utils::enquote_name()) is used to safely
 quote SQL identifiers such as table names or column names. This can be used
@@ -349,7 +464,7 @@ let sql = "select * from departments where {col} = :1";
 let cursor = connection.query(&sql, &[&val])?;
 ```
 
-### <a name="quoteliterals"></a> 3.3.2 Quoting Literals
+### <a name="quoteliterals"></a> 3.4.2 Quoting Literals
 
 When including literal values dynamically in SQL statements, it is important
 to quote them properly so that SQL interprets them correctly. This can be done
@@ -375,7 +490,7 @@ select * from employees where last_name = 'O''Reilly'
 Note how the single quote in "O'Reilly" is automatically escaped (''), so the
 SQL remains valid.
 
-### <a name="validatesimplesqlnames"></a> 3.3.3 Validating Simple SQL Names
+### <a name="validatesimplesqlnames"></a> 3.4.3 Validating Simple SQL Names
 
 [oracledb::is_simple_sql_name()](crate::utils::is_simple_sql_name()) checks
 whether the input value contains a valid SQL name. If the value is not quoted,
@@ -400,7 +515,7 @@ println!("{}", oracledb::is_simple_sql_name(""))           // false (empty strin
 println!("{}", oracledb::is_simple_sql_name(" \"EMP\"X ")) // false (characters outside quotes)
 ```
 
-### <a name="validatequalifiedsqlnames"></a> 3.3.4 Validating Qualified SQL Names
+### <a name="validatequalifiedsqlnames"></a> 3.4.4 Validating Qualified SQL Names
 
 [oracledb::is_qualified_sql_name()](crate::utils::is_qualified_sql_name())
 checks whether the input value contains a valid qualified SQL name. The name

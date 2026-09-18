@@ -261,14 +261,14 @@ fn test_2708(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 /// Tests statement execution options, including excluding a statement from
 /// the statement cache while fetching in small batches.
 fn test_2709(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let mut statement = conn.statement(
-        "select level from dual connect by level <= :1 order by level",
-    )?;
-    statement
+    let values = conn
+        .statement(
+            "select level from dual connect by level <= :1 order by level",
+        )?
         .exclude_from_cache()
         .prefetch_rows(1)
-        .fetch_array_size(1);
-    let values = statement
+        .fetch_array_size(1)
+        .build()?
         .query(&[&5])?
         .map(|row| row?.get::<i32>(0))
         .collect::<Result<Vec<_>, _>>()?;
@@ -351,11 +351,13 @@ fn test_2712(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         oracledb::ErrorKind::InvalidColumnIndex(1)
     ));
 
-    let mut statement = conn.statement(
-        "select level from dual connect by level <= 11 order by level",
-    )?;
-    statement.prefetch_rows(1).fetch_array_size(1);
-    let values = statement
+    let values = conn
+        .statement(
+            "select level from dual connect by level <= 11 order by level",
+        )?
+        .prefetch_rows(1)
+        .fetch_array_size(1)
+        .build()?
         .query(&[])?
         .map(|row| row?.get::<i32>(0))
         .collect::<Result<Vec<_>, _>>()?;
@@ -367,9 +369,11 @@ fn test_2712(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 /// Tests that a cached named statement resizes its bind metadata when a later
 /// execution supplies a substantially longer value.
 fn test_2713(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement("select length(:value) from dual")?;
     for value in ["x".to_string(), "y".repeat(4000)] {
-        let row = statement.query_row_named(&[("value", &value)])?;
+        let row = conn.query_row_named(
+            "select length(:value) from dual",
+            &[("value", &value)],
+        )?;
         let length: i32 = row.get(0)?;
         assert_eq!(length, value.len() as i32);
     }
@@ -383,7 +387,11 @@ fn test_2713(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 fn test_2714(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let sql = "select to_clob(:1) from dual";
     let value = "statement cache LOB option".to_string();
-    let mut row = conn.statement(sql)?.fetch_lobs().query_row(&[&value])?;
+    let mut row = conn
+        .statement(sql)?
+        .fetch_lobs()
+        .build()?
+        .query_row(&[&value])?;
     let _: oracledb::Lob = row.take(0)?;
     row = conn.query_row(sql, &[&value])?;
     let fetched_value: String = row.get(0)?;
@@ -589,15 +597,19 @@ fn test_2721(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             &[&id, payload1, payload2],
         )?;
     }
-    let mut statement = conn.statement(
-        r#"
+    let cursor = conn
+        .statement(
+            r#"
         select id, data1, id + 20, data2, cursor(select 99 from dual)
         from test_2721
         order by id
         "#,
-    )?;
-    statement.prefetch_rows(1).fetch_array_size(1).fetch_lobs();
-    let cursor = statement.query(&[])?;
+        )?
+        .prefetch_rows(1)
+        .fetch_array_size(1)
+        .fetch_lobs()
+        .build()?
+        .query(&[])?;
     for (index, row) in cursor.enumerate() {
         let mut row = row?;
         let id = (index + 1) as i32;
@@ -685,7 +697,9 @@ fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         "test_2724",
         "id number primary key, value varchar2(30)",
     )?;
-    let statement = conn.statement("insert into test_2724 values (:1, :2)")?;
+    let mut statement = conn
+        .statement("insert into test_2724 values (:1, :2)")?
+        .build()?;
     statement.execute(&[&1, &"first"])?;
     conn.commit()?;
 
@@ -702,5 +716,27 @@ fn test_2724(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let row =
         conn.query_row("select value from test_2724 where id = 2", &[])?;
     assert_eq!(row.get::<String>(0)?, "after-error");
+    Ok(())
+}
+
+#[rstest]
+/// Verifies metadata before and after being fully parsed by the database.
+fn test_2725(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let mut statement = conn.statement("select user from dual")?.build()?;
+    assert!(!statement.is_ddl());
+    assert!(!statement.is_dml());
+    assert!(!statement.is_dml_returning());
+    assert!(!statement.is_dml_returning());
+    assert!(!statement.is_fully_parsed());
+    assert!(!statement.is_plsql());
+    assert!(statement.is_query());
+    assert_eq!(statement.out_metadata().len(), 0);
+    statement.ensure_fully_parsed()?;
+    assert!(statement.is_fully_parsed());
+    assert_eq!(statement.out_metadata().len(), 1);
+    assert_eq!(
+        statement.out_metadata()[0].db_type(),
+        oracledb::DB_TYPE_VARCHAR
+    );
     Ok(())
 }

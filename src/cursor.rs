@@ -37,14 +37,14 @@ use crate::error::Error;
 use crate::metadata::Metadata;
 use crate::response::Response;
 use crate::row::{DbRow, Row};
-use crate::statement::StatementHolder;
+use crate::statement::Statement;
 
 /// Represents a set of rows retrieved from the database by calling
 /// [Connection::query()](`crate::Connection::query`) or
 /// [Connection::query_named()](`crate::Connection::query_named`). This struct
 /// implements the Iterator trait.
 pub struct Cursor {
-    statement_holder: StatementHolder,
+    statement: Statement,
     column_info: Arc<Vec<Metadata>>,
     rows: VecDeque<DbRow>,
     last_row: Option<DbRow>,
@@ -55,7 +55,7 @@ impl Cursor {
     /// Fetches more rows from the database.
     fn get_more_rows(&mut self) -> Result<(), Error> {
         let last_row = self.last_row.take();
-        self.set_from_response(self.statement_holder.fetch(last_row)?);
+        self.set_from_response(self.statement.fetch(last_row)?);
         Ok(())
     }
 
@@ -75,16 +75,18 @@ impl Cursor {
         &mut self,
         params: BindParameters,
     ) -> Result<(), Error> {
-        let response = self.statement_holder.execute_batch(params)?;
+        let response = self.statement.get_execute_batch_response(params)?;
         self.set_from_initial_response(response);
+        let metadata = self.statement.out_metadata().to_vec();
+        self.column_info = Arc::new(metadata);
         Ok(())
     }
 
     /// Creates a new cursor.
-    pub(crate) fn new(statement_holder: StatementHolder) -> Self {
-        let metadata = statement_holder.statement().out_metadata().to_vec();
+    pub(crate) fn new(statement: Statement) -> Self {
+        let metadata = statement.out_metadata().to_vec();
         Self {
-            statement_holder,
+            statement,
             column_info: Arc::new(metadata),
             rows: VecDeque::<DbRow>::new(),
             last_row: None,
@@ -100,14 +102,14 @@ impl Cursor {
     }
 
     /// Returns the columns associated with the cursor. If the cursor does not
-    /// reference a query, the vector will be empty.
-    pub fn columns(&self) -> &Vec<Metadata> {
-        self.statement_holder.statement().out_metadata()
+    /// reference a query, the returned slice will be empty.
+    pub fn columns(&self) -> &[Metadata] {
+        &self.column_info
     }
 
     /// Returns the sql associated with the cursor.
     pub fn sql(&self) -> &str {
-        self.statement_holder.statement().sql()
+        self.statement.sql()
     }
 }
 

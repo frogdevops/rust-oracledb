@@ -50,7 +50,7 @@ use crate::messages::PingMessage;
 use crate::messages::RollbackMessage;
 use crate::ora_version::OracleVersion;
 use crate::row::Row;
-use crate::statement::Statement;
+use crate::statement::StatementBuilder;
 
 pub(crate) struct ConnImpl {
     client_ref: ClientRef,
@@ -162,7 +162,7 @@ impl ConnImpl {
         sql: &str,
         params: &[&dyn ToDbValue],
     ) -> Result<ExecResult, Error> {
-        self.statement(sql).execute(params)
+        self.statement(sql).build()?.execute(params)
     }
 
     /// Executes a SQL statement against the database multiple times in one
@@ -172,7 +172,7 @@ impl ConnImpl {
         sql: &str,
         params: BindParameters,
     ) -> Result<ExecBatchResult, Error> {
-        self.statement(sql).execute_batch(params)
+        self.statement(sql).build()?.execute_batch(params)
     }
 
     /// Executes a SQL statement against the database using named parameters.
@@ -181,7 +181,7 @@ impl ConnImpl {
         sql: &str,
         params: &[(&str, &dyn ToDbValue)],
     ) -> Result<ExecResult, Error> {
-        self.statement(sql).execute_named(params)
+        self.statement(sql).build()?.execute_named(params)
     }
 
     /// Returns the call timeout configured on the connection.
@@ -253,7 +253,7 @@ impl ConnImpl {
         sql: &str,
         params: &[&dyn ToDbValue],
     ) -> Result<Cursor, Error> {
-        self.statement(sql).query(params)
+        self.statement(sql).build()?.query(params)
     }
 
     #[cfg(feature = "arrow")]
@@ -264,7 +264,7 @@ impl ConnImpl {
         sql: &str,
         params: BindParameters,
     ) -> Result<arrow_array::RecordBatch, Error> {
-        self.statement(sql).query_arrow(params)
+        self.statement(sql).build()?.query_arrow(params)
     }
 
     /// Executes a query against the database using named parameters.
@@ -273,7 +273,7 @@ impl ConnImpl {
         sql: &str,
         params: &[(&str, &dyn ToDbValue)],
     ) -> Result<Cursor, Error> {
-        self.statement(sql).query_named(params)
+        self.statement(sql).build()?.query_named(params)
     }
 
     /// Executes a query against the database.
@@ -285,6 +285,7 @@ impl ConnImpl {
         self.statement(sql)
             .prefetch_rows(1)
             .fetch_array_size(1)
+            .build()?
             .query_row(params)
     }
 
@@ -297,6 +298,7 @@ impl ConnImpl {
         self.statement(sql)
             .prefetch_rows(1)
             .fetch_array_size(1)
+            .build()?
             .query_row_named(params)
     }
 
@@ -361,10 +363,10 @@ impl ConnImpl {
         client.set_pending_module(db_op);
     }
 
-    /// Creates a Statement structure which can be used to specify
-    /// various statement options.
-    pub fn statement<'sql>(&self, sql: &'sql str) -> Statement<'sql> {
-        Statement::new(&self.client_ref, sql)
+    /// Creates a StatementBuilder structure which can be used to specify
+    /// various statement options before a Statement is created.
+    pub fn statement<'sql>(&self, sql: &'sql str) -> StatementBuilder<'sql> {
+        StatementBuilder::new(&self.client_ref, sql)
     }
 }
 

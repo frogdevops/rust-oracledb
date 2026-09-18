@@ -46,7 +46,7 @@ use crate::metadata::Metadata;
 use crate::ora_type::OracleNumber;
 use crate::ora_type::OracleTimestamp;
 use crate::row::Row;
-use crate::statement::StatementHolder;
+use crate::statement::Statement;
 
 /// Returns the default schema to use for fetching data in the Arrow format.
 fn default_schema(columns: &[Metadata]) -> Result<Schema, Error> {
@@ -102,11 +102,11 @@ fn default_type(col: &Metadata) -> Result<DataType, Error> {
 /// Performs a query with one or more sets of parameters and returns a single
 /// RecordBatch containing all of the data.
 pub(crate) fn query_single_batch(
-    holder: StatementHolder,
+    statement: Statement,
     params: BindParameters,
 ) -> Result<arrow_array::RecordBatch, Error> {
     // perform first query to determine the schema
-    let mut cursor = Cursor::new(holder);
+    let mut cursor = Cursor::new(statement);
     cursor.execute(params.slice(0, 1))?;
     let mut creator = RecordBatchCreator::new(cursor.columns())?;
     for row in cursor.by_ref() {

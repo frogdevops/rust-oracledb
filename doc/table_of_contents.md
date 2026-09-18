@@ -89,11 +89,14 @@ instead of the mouse.
 
    3.2 [INSERT and UPDATE Statements](#dml)
 
-   3.3 [Dynamic SQL Construction and Validation](#validatingsql)
-   - 3.3.1 [Quoting SQL Identifiers](#quotenames)
-   - 3.3.2 [Quoting Literals](#quoteliterals)
-   - 3.3.3 [Validating Simple SQL Names](#validatesimplesqlnames)
-   - 3.3.4 [Validating Qualified SQL Names](#validatequalifiedsqlnames)
+   3.3 [Building and Inspecting Statements](#statementbuilding)
+   - 3.3.1 [Inspecting a Statement](#statementinspecting)
+
+   3.4 [Dynamic SQL Construction and Validation](#validatingsql)
+   - 3.4.1 [Quoting SQL Identifiers](#quotenames)
+   - 3.4.2 [Quoting Literals](#quoteliterals)
+   - 3.4.3 [Validating Simple SQL Names](#validatesimplesqlnames)
+   - 3.4.4 [Validating Qualified SQL Names](#validatequalifiedsqlnames)
 
 4. [Executing PL/SQL](#plsqlexecution)
 

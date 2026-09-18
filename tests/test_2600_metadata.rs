@@ -139,7 +139,7 @@ fn test_2601(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     assert_eq!(columns[1].db_type(), oracledb::DB_TYPE_LONG_NVARCHAR);
     assert_eq!(columns[2].db_type(), oracledb::DB_TYPE_LONG_RAW);
 
-    let cursor = conn.statement(sql)?.fetch_lobs().query(&[])?;
+    let cursor = conn.statement(sql)?.fetch_lobs().build()?.query(&[])?;
     let columns = cursor.columns();
     assert_eq!(columns[0].db_type(), oracledb::DB_TYPE_CLOB);
     assert_eq!(columns[1].db_type(), oracledb::DB_TYPE_NCLOB);

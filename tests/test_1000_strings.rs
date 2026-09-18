@@ -48,11 +48,11 @@ fn test_1000(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 /// test query with CHAR
 fn test_1001(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let cursor =
-        conn.query("select cast('test_1007' as char(9)) from dual", &[])?;
+        conn.query("select cast('test_1001' as char(9)) from dual", &[])?;
     for row in cursor {
         let row = row?;
         let value: String = row.get(0)?;
-        assert_eq!(value, "test_1007");
+        assert_eq!(value, "test_1001");
     }
     Ok(())
 }

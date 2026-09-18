@@ -46,7 +46,7 @@ use crate::lob::Lob;
 use crate::ora_version::OracleVersion;
 use crate::pool::PoolContentsRef;
 use crate::row::Row;
-use crate::statement::Statement;
+use crate::statement::StatementBuilder;
 
 /// Represents a connection to the database. This can be either a standalone
 /// connection created by calling [connect()](`crate::connect`) or a pooled
@@ -338,7 +338,7 @@ impl Connection {
     pub fn statement<'sql>(
         &self,
         sql: &'sql str,
-    ) -> Result<Statement<'sql>, Error> {
+    ) -> Result<StatementBuilder<'sql>, Error> {
         Ok(self.get_impl()?.statement(sql))
     }
 

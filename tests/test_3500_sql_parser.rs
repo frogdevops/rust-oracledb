@@ -31,124 +31,133 @@ mod common;
 use common::conn;
 use rstest::*;
 
+/// Verifies that the SQL contains the named bind variables.
+fn verify_bind_names(
+    conn: oracledb::Connection,
+    sql: &str,
+    bind_names: &[&str],
+) -> Result<(), oracledb::Error> {
+    assert_eq!(conn.statement(sql)?.build()?.bind_names(), bind_names);
+    Ok(())
+}
+
 #[rstest]
 /// handling of single line comments
 fn test_3500(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         "--begin :value2 := :a + :b + :c +:a +3; end;\n\
         begin :value2 := :a + :c +3; end; -- not a :bind_variable",
-    )?;
-    assert_eq!(statement.bind_names()?, ["VALUE2", "A", "C"]);
-    Ok(())
+        &["VALUE2", "A", "C"],
+    )
 }
 
 #[rstest]
 /// handling of multiple line comments
 fn test_3501(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         "/*--select * from :a where :a = 1\n\
         select * from table_names where :a = 1*/\n\
         select :table_name, :value from dual",
-    )?;
-    assert_eq!(statement.bind_names()?, ["TABLE_NAME", "VALUE"]);
-    Ok(())
+        &["TABLE_NAME", "VALUE"],
+    )
 }
 
 #[rstest]
 /// handling of constant strings
 fn test_3502(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         "begin \
             :value := to_date('20021231 12:31:00', :format); \
         end;",
-    )?;
-    assert_eq!(statement.bind_names()?, ["VALUE", "FORMAT"]);
-    Ok(())
+        &["VALUE", "FORMAT"],
+    )
 }
 
 #[rstest]
 /// multiple division operators
 fn test_3503(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement("select :a / :b, :c / :d from dual")?;
-    assert_eq!(statement.bind_names()?, ["A", "B", "C", "D"]);
-    Ok(())
+    verify_bind_names(
+        conn,
+        "select :a / :b, :c / :d from dual",
+        &["A", "B", "C", "D"],
+    )
 }
 
 #[rstest]
 /// subqueries starting with parentheses
 fn test_3504(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement =
-        conn.statement("(select :a from dual) union (select :b from dual")?;
-    assert_eq!(statement.bind_names()?, ["A", "B"]);
-    Ok(())
+    verify_bind_names(
+        conn,
+        "(select :a from dual) union (select :b from dual",
+        &["A", "B"],
+    )
 }
 
 #[rstest]
 /// invalid quoted bind
 fn test_3505(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(r#"select ":test", :a from dual"#)?;
-    assert_eq!(statement.bind_names()?, ["A"]);
-    Ok(())
+    verify_bind_names(conn, r#"select ":test", :a from dual"#, &["A"])
 }
 
 #[rstest]
 /// non-ascii characters in the bind name
 fn test_3506(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement("select :méil$ from dual")?;
-    assert_eq!(statement.bind_names()?, ["MÉIL$"]);
-    Ok(())
+    verify_bind_names(conn, "select :méil$ from dual", &["MÉIL$"])
 }
 
 #[rstest]
-#[case(r#"select :"percent%" from dual"#, vec!["percent%"])]
-#[case(r#"select : "q?marks" from dual"#, vec!["q?marks"])]
-#[case(r#"select :"percent%(ens)yah" from dual"#, vec!["percent%(ens)yah"])]
-#[case(r#"select :  "per % cent" from dual"#, vec!["per % cent"])]
-#[case(r#"select :"per cent" from dual"#, vec!["per cent"])]
-#[case(r#"select :"par(ens)" from dual"#, vec!["par(ens)"])]
-#[case(r#"select :"more/slashes" from dual"#, vec!["more/slashes"])]
-#[case(r#"select :"%percent" from dual"#, vec!["%percent"])]
-#[case(r#"select :"/slashes/" from dual"#, vec!["/slashes/"])]
-#[case(r#"select :"1col:on" from dual"#, vec!["1col:on"])]
-#[case(r#"select :"col:ons" from dual"#, vec!["col:ons"])]
-#[case(r#"select :"more :: %colons%"#, vec!["more :: %colons%"])]
-#[case(r#"select :"more/slashes" from dual"#, vec!["more/slashes"])]
-#[case(r#"select :"spaces % spaces" from dual"#, vec!["spaces % spaces"])]
-#[case(r#"select "col:nns", :"col:ons", :id"#, vec!["col:ons", "ID"])]
+#[case(r#"select :"percent%" from dual"#, &["percent%"])]
+#[case(r#"select : "q?marks" from dual"#, &["q?marks"])]
+#[case(r#"select :"percent%(ens)yah" from dual"#, &["percent%(ens)yah"])]
+#[case(r#"select :  "per % cent" from dual"#, &["per % cent"])]
+#[case(r#"select :"per cent" from dual"#, &["per cent"])]
+#[case(r#"select :"par(ens)" from dual"#, &["par(ens)"])]
+#[case(r#"select :"more/slashes" from dual"#, &["more/slashes"])]
+#[case(r#"select :"%percent" from dual"#, &["%percent"])]
+#[case(r#"select :"/slashes/" from dual"#, &["/slashes/"])]
+#[case(r#"select :"1col:on" from dual"#, &["1col:on"])]
+#[case(r#"select :"col:ons" from dual"#, &["col:ons"])]
+#[case(r#"select :"more :: %colons%"#, &["more :: %colons%"])]
+#[case(r#"select :"more/slashes" from dual"#, &["more/slashes"])]
+#[case(r#"select :"spaces % spaces" from dual"#, &["spaces % spaces"])]
+#[case(r#"select "col:nns", :"col:ons", :id"#, &["col:ons", "ID"])]
 /// quoted bind names
 fn test_3507(
     conn: oracledb::Connection,
     #[case] sql: &str,
-    #[case] expected_bind_names: Vec<&str>,
+    #[case] expected_bind_names: &[&str],
 ) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(sql)?;
-    assert_eq!(statement.bind_names()?, expected_bind_names);
-    Ok(())
+    verify_bind_names(conn, sql, expected_bind_names)
 }
 
 #[rstest]
 /// quoted identifiers and strings together
 fn test_3508(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"select "/*_value1" + : "VaLue_2" + :"*/3VALUE" from dual"#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["VaLue_2", "*/3VALUE"]);
-    Ok(())
+        &["VaLue_2", "*/3VALUE"],
+    )
 }
 
 #[rstest]
 /// binds between simple strings
 fn test_3509(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn
-        .statement(r#"select '"string_1"', :bind_1, ':string_2' from dual"#)?;
-    assert_eq!(statement.bind_names()?, ["BIND_1"]);
-    Ok(())
+    verify_bind_names(
+        conn,
+        r#"select '"string_1"', :bind_1, ':string_2' from dual"#,
+        &["BIND_1"],
+    )
 }
 
 #[rstest]
 /// binds between comment blocks
 fn test_3510(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"
         select
             /* comment 1 with /* */
@@ -159,15 +168,15 @@ fn test_3510(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             :c
         from dual
         "#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["A", "B", "C"]);
-    Ok(())
+        &["A", "B", "C"],
+    )
 }
 
 #[rstest]
 /// binds between q-strings
 fn test_3511(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"
         select
             :a,
@@ -183,15 +192,15 @@ fn test_3511(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             :f
         from dual
         "#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["A", "B", "C", "D", "E", "F"]);
-    Ok(())
+        &["A", "B", "C", "D", "E", "F"],
+    )
 }
 
 #[rstest]
 /// binds between JSON constants
 fn test_3512(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"
         select
             json_object('foo':dummy),
@@ -202,30 +211,28 @@ fn test_3512(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             :bv4
         from dual
         "#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["BV1", "BV2", "BV3", "BV4"]);
-    Ok(())
+        &["BV1", "BV2", "BV3", "BV4"],
+    )
 }
 
 #[rstest]
 /// multiple line comment with multiple asterisks
 fn test_3513(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"
         /****--select * from :a where :a = 1
         select * from table_names where :a = 1****/
         select :table_name, :value from dual
         "#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["TABLE_NAME", "VALUE"]);
-    Ok(())
+        &["TABLE_NAME", "VALUE"],
+    )
 }
 
 #[rstest]
 /// q-string without a closing quote
 fn test_3514(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement("select q'[something from dual")?;
-    let err = match statement.bind_names() {
+    let err = match conn.statement("select q'[something from dual")?.build() {
         Ok(_) => panic!("expected failure"),
         Err(err) => err,
     };
@@ -236,7 +243,8 @@ fn test_3514(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 #[rstest]
 /// different space combinations with :=
 fn test_3515(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"
         begin
             :value2 :=
@@ -245,15 +253,15 @@ fn test_3515(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
                 := :a + :c +3;
         end;
         "#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["VALUE2", "A", "B", "C"]);
-    Ok(())
+        &["VALUE2", "A", "B", "C"],
+    )
 }
 
 #[rstest]
 /// binds between multiple comment blocks with quotes
 fn test_3516(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement(
+    verify_bind_names(
+        conn,
         r#"
         select
             /* ' comment 1 */
@@ -264,16 +272,14 @@ fn test_3516(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             /* comment 4 ""*/
         from dual
         "#,
-    )?;
-    assert_eq!(statement.bind_names()?, ["A", "B", "C"]);
-    Ok(())
+        &["A", "B", "C"],
+    )
 }
 
 #[rstest]
 /// query with a missing end quote
 fn test_3517(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement("select 'abc, :a from dual")?;
-    let err = match statement.bind_names() {
+    let err = match conn.statement("select 'abc, :a from dual")?.build() {
         Ok(_) => panic!("expected failure"),
         Err(err) => err,
     };
@@ -284,8 +290,7 @@ fn test_3517(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 #[rstest]
 /// q-string with incorrect closing symbols
 fn test_3518(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let statement = conn.statement("select q'[abc'], 5 from dual")?;
-    let err = match statement.bind_names() {
+    let err = match conn.statement("select q'[abc'], 5 from dual")?.build() {
         Ok(_) => panic!("expected failure"),
         Err(err) => err,
     };

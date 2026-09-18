@@ -13,7 +13,7 @@ Rust-oracledb uses [oracledb::DB_TYPE_CLOB](crate::DB_TYPE_CLOB),
 [oracledb::DB_TYPE_BLOB](crate::DB_TYPE_BLOB) to represent CLOB,
 NCLOB, and BLOB database types respectively. LOB data can be fetched as
 `oracledb::Lob` locators by using
-[Statement::fetch_lobs()](crate::Statement::fetch_lobs), or as
+[StatementBuilder::fetch_lobs()](crate::StatementBuilder::fetch_lobs), or as
 native Rust values `String` for CLOB/NCLOB data and `Vec<u8>` for BLOB data.
 
 ## <a name="simplelobs"></a> 9.1 Simple Inserting and Querying of LOBs
@@ -88,6 +88,7 @@ You can fetch with a LOB locator as shown below:
 let mut row = connection
     .statement("select b from lob_locator_tbl where id = :1")?
     .fetch_lobs()
+    .build()?
     .query_row(&[&id])?;
 let mut blob: oracledb::Lob = row.take(0)?;
 let mut fetched_blob = Vec::new();

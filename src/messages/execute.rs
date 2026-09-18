@@ -53,25 +53,6 @@ pub struct ExecuteMessage<'statement, 'params> {
 }
 
 impl ExecuteMessage<'_, '_> {
-    pub fn new<'statement, 'params>(
-        statement: &'statement mut CachedStatement,
-        params: BindParameters<'params>,
-    ) -> ExecuteMessage<'statement, 'params> {
-        ExecuteMessage {
-            parse_only: false,
-            scroll_operation: false,
-            batch_errors: false,
-            array_dml_row_counts: false,
-            num_execs: params.num_rows().try_into().unwrap(),
-            num_fetch_columns: 0,
-            autocommit: false,
-            fetch_orientation: 0,
-            fetch_pos: 0,
-            statement,
-            params,
-        }
-    }
-
     /// Writes bind metadata to the buffer.
     fn write_bind_metadata(&self, client: &Client, buf: &mut WriteBuffer) {
         for bind_info in self.statement.binds() {
@@ -299,6 +280,27 @@ impl ExecuteMessage<'_, '_> {
             .bind_indexes_for_execute(client.max_string_size(), true);
         if !bind_indexes.is_empty() {
             self.write_bind_params(buf, bind_indexes);
+        }
+    }
+
+    /// Creates a new execute message.
+    pub(crate) fn new<'statement, 'params>(
+        statement: &'statement mut CachedStatement,
+        params: BindParameters<'params>,
+        parse_only: bool,
+    ) -> ExecuteMessage<'statement, 'params> {
+        ExecuteMessage {
+            parse_only,
+            scroll_operation: false,
+            batch_errors: false,
+            array_dml_row_counts: false,
+            num_execs: params.num_rows().try_into().unwrap(),
+            num_fetch_columns: 0,
+            autocommit: false,
+            fetch_orientation: 0,
+            fetch_pos: 0,
+            statement,
+            params,
         }
     }
 }

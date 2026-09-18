@@ -10,6 +10,9 @@
     [Metadata::vector_dimensions()](crate::Metadata::vector_dimensions()) and
     [Metadata::vector_dimensions()](crate::Metadata::vector_storage_format())
     and the enumeration [VectorStorageFormat](crate::VectorStorageFormat).
+1.  Added new struct [StatementBuilder](crate::StatementBuilder) to capture the
+    options used to build a statement and added a number of functions on the
+    struct [Statement](crate::Statement) to aid in introspection.
 1.  Added method [Row::columns()](crate::Row::columns()) to provide information
     about the columns found in that particular row.
 1.  Added struct [DbError](crate::DbError) containing information about the
