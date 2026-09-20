@@ -63,31 +63,39 @@ fn test_1101() {
     );
 }
 
-#[test]
-/// test conversion to OracleNumber from string
-fn test_1102() {
-    let options = vec![
-        ("0", "0"),
-        ("00000", "0"),
-        ("000001", "1"),
-        ("-000008.1", "-8.1"),
-        ("-1", "-1"),
-        (".1", "0.1"),
-        ("0.0", "0"),
-        ("0.9", "0.9"),
-        ("-.1", "-0.1"),
-        (".01", "0.01"),
-        (".00502", "0.00502"),
-        ("-.0000102", "-0.0000102"),
-        ("-15000", "-15000"),
-        ("-99.12345", "-99.12345"),
-        ("1000.0001", "1000.0001"),
-        ("9000.000900", "9000.0009"),
-    ];
-    for (in_val, out_val) in options {
-        let num: oracledb::OracleNumber = in_val.parse().unwrap();
-        assert_eq!(num.to_string(), out_val);
-    }
+#[rstest]
+/// test conversion to OracleNumber from string and round tripping to the
+/// database
+#[case("0", "0")]
+#[case("00000", "0")]
+#[case("000001", "1")]
+#[case("-000008.1", "-8.1")]
+#[case("-1", "-1")]
+#[case(".1", "0.1")]
+#[case("0.0", "0")]
+#[case("0.9", "0.9")]
+#[case("-.1", "-0.1")]
+#[case(".01", "0.01")]
+#[case(".00502", "0.00502")]
+#[case("-.0000102", "-0.0000102")]
+#[case("-15000", "-15000")]
+#[case("-99.12345", "-99.12345")]
+#[case("1000.0001", "1000.0001")]
+#[case("9000.000900", "9000.0009")]
+#[case("0.0005", "0.0005")]
+#[case("0.0123", "0.0123")]
+#[case("0.0001", "0.0001")]
+fn test_1102(
+    conn: oracledb::Connection,
+    #[case] in_val: &str,
+    #[case] out_val: &str,
+) -> Result<(), oracledb::Error> {
+    let num: oracledb::OracleNumber = in_val.parse().unwrap();
+    assert_eq!(num.to_string(), out_val);
+    let row = conn.query_row("select :1 from dual", &[&num])?;
+    let fetched_num: oracledb::OracleNumber = row.get(0)?;
+    assert_eq!(fetched_num.to_string(), out_val);
+    Ok(())
 }
 
 #[rstest]

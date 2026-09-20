@@ -23,6 +23,9 @@
     variable `ORA_SDTZ` or the client's local time zone (#9).
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
+1.  Fixed encoding of Oracle NUMBER data for values with an odd number of
+    leading zeroes after the decimal point
+    ([issue 21](https://github.com/oracle/rust-oracledb/issues/21)).
 1.  Ensure that connections returned from a pool always start with a call
     timeout of None.
 
