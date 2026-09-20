@@ -75,7 +75,7 @@ impl Cursor {
         &mut self,
         params: BindParameters,
     ) -> Result<(), Error> {
-        let response = self.statement.get_execute_batch_response(params)?;
+        let response = self.statement.get_execute_response(params, false)?;
         self.set_from_initial_response(response);
         let metadata = self.statement.out_metadata().to_vec();
         self.column_info = Arc::new(metadata);

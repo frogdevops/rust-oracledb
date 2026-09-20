@@ -40,8 +40,6 @@ use crate::db_value::ToDbValue;
 use crate::error::Error;
 use crate::exec_result::ExecBatchResult;
 use crate::exec_result::ExecResult;
-use crate::messages::ExecuteMessage;
-use crate::messages::FetchMessage;
 use crate::metadata::Metadata;
 use crate::response::Response;
 use crate::row::DbRow;
@@ -54,63 +52,30 @@ pub struct Statement {
 }
 
 impl Statement {
-    /// Gets the response to the execution of a statement. At this point binds
-    /// have been checked and transformed (if needed) into the sequence
-    /// required by the server.
-    fn get_execute_response(
-        &mut self,
-        params: BindParameters,
-        parse_only: bool,
-    ) -> Result<Response, Error> {
-        let mut client = self.client_ref.lock().unwrap();
-        let mut message =
-            ExecuteMessage::new(&mut self.statement, params, parse_only);
-        let mut response = client.process_message(&mut message)?;
-        response
-            .finalize_rows(&self.client_ref, self.statement.out_metadata());
-        if self.statement.requires_define() {
-            self.statement.clear_requires_define();
-        }
-        Ok(response)
-    }
-
-    /// Gets the response to the execution of a statement multiple times. At
-    /// this point binds have been checked and transformed (if needed) into the
-    /// sequence required by the server. Note that statements that require
-    /// single execution are performed once first before subsequent iterations
-    /// are performed in a batch.
-    /// round trip. Statements that require single execution are performed once
-    /// first before subsequent iterations are performed as a batch.
-    pub(crate) fn get_execute_batch_response(
-        &mut self,
-        params: BindParameters,
-    ) -> Result<Response, Error> {
-        self.statement.check_binds(&params)?;
-        if params.num_rows() > 1 && self.statement.requires_single_execute() {
-            let mut initial_resp =
-                self.get_execute_response(params.slice(0, 1), false)?;
-            let mut final_resp = self.get_execute_response(
-                params.slice(1, params.num_rows() - 1),
-                false,
-            )?;
-            final_resp.transfer_info(&mut initial_resp);
-            Ok(final_resp)
-        } else {
-            self.get_execute_response(params, false)
-        }
-    }
-
     /// Gets the response to a fetch.
     pub(crate) fn fetch(
         &self,
         last_row: Option<DbRow>,
     ) -> Result<Response, Error> {
         let mut client = self.client_ref.lock().unwrap();
-        let mut message = FetchMessage::new(&self.statement, last_row);
-        let mut response = client.process_message(&mut message)?;
-        response
-            .finalize_rows(&self.client_ref, self.statement.out_metadata());
-        Ok(response)
+        client.fetch(&self.statement, &self.client_ref, last_row)
+    }
+
+    /// Gets the response to the execution of a statement. At this point binds
+    /// have been checked and transformed (if needed) into the sequence
+    /// required by the server.
+    pub(crate) fn get_execute_response(
+        &mut self,
+        params: BindParameters,
+        parse_only: bool,
+    ) -> Result<Response, Error> {
+        let mut client = self.client_ref.lock().unwrap();
+        client.execute(
+            &mut self.statement,
+            &self.client_ref,
+            params,
+            parse_only,
+        )
     }
 
     /// Creates a new public facing statement from the internal cached
@@ -161,8 +126,9 @@ impl Statement {
         &mut self,
         params: BindParameters,
     ) -> Result<ExecBatchResult, Error> {
+        self.statement.check_binds(&params)?;
         let num_execs = params.num_rows();
-        let mut response = self.get_execute_batch_response(params)?;
+        let mut response = self.get_execute_response(params, false)?;
         Ok(ExecBatchResult::new(
             &self.statement,
             num_execs,
@@ -245,9 +211,10 @@ impl Statement {
     /// Performs a query against the database and returns an Arrow RecordBatch
     /// structure containing the data.
     pub fn query_arrow(
-        self,
+        mut self,
         params: BindParameters,
     ) -> Result<arrow_array::RecordBatch, Error> {
+        self.statement.check_binds(&params)?;
         arrow::query_single_batch(self, params)
     }
 
