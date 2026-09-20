@@ -31,8 +31,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-#[cfg(feature = "arrow")]
-use crate::bind_params::BindParameters;
 use crate::error::Error;
 use crate::metadata::Metadata;
 use crate::response::Response;
@@ -67,19 +65,6 @@ impl Cursor {
         } else {
             self.rows.clear();
         }
-    }
-
-    /// Executes the SQL statement and processes the initial response.
-    #[cfg(feature = "arrow")]
-    pub(crate) fn execute(
-        &mut self,
-        params: BindParameters,
-    ) -> Result<(), Error> {
-        let response = self.statement.get_execute_response(params, false)?;
-        self.set_from_initial_response(response);
-        let metadata = self.statement.out_metadata().to_vec();
-        self.column_info = Arc::new(metadata);
-        Ok(())
     }
 
     /// Creates a new cursor.

@@ -215,7 +215,13 @@ impl Statement {
         params: BindParameters,
     ) -> Result<arrow_array::RecordBatch, Error> {
         self.statement.check_binds(&params)?;
-        arrow::query_single_batch(self, params)
+        let mut client = self.client_ref.lock().unwrap();
+        arrow::query_single_batch(
+            &mut client,
+            &mut self.statement,
+            &self.client_ref,
+            params,
+        )
     }
 
     /// Executes the statement with the given parameters and returns a Cursor
