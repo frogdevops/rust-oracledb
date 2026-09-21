@@ -2,6 +2,44 @@
 
 ## rust-oracledb 26.0.0-beta.4 (TBD)
 
+### Fork migration: consuming execution output
+
+This fork removes the draining extraction methods and empty-row fallbacks.
+
+| Removed method | Replacement | Return type |
+| --- | --- | --- |
+| `ExecResult::out_bind_data()` | `into_out_bind_data(self)` | `Result<Option<Row>, Error>` |
+| `ExecResult::returned_data()` | `into_returned_data(self)` | `Result<Option<Vec<Row>>, Error>` |
+| `ExecResult::returned_row()` | `into_returned_row(self)` | `Result<Row, Error>` |
+| `ExecBatchResult::out_bind_data()` | `into_out_bind_data(self)` | `Result<Option<Vec<Row>>, Error>` |
+| `ExecBatchResult::returned_data()` | `into_returned_data(self)` | `Result<Option<Vec<Vec<Row>>>, Error>` |
+
+Read `rows_affected()` before extraction. Match the returned `Option` explicitly;
+`None` is absent output, while `Some(vec![])` is a supplied DML container with
+zero rows. SQL NULL remains `Option<T>` inside a row. Extraction consumes the
+result on success or error, so it cannot be repeated. Keep the extracted row
+when reading several columns. The exact-one helper returns `NoDataFound` for
+absent or empty output and `OutOfRange` for multiple rows.
+
+Existing output of the wrong kind produces
+`ErrorKind::ExecutionOutputKindMismatch`. PL/SQL OUT values bypass DML
+transposition. DML RETURNING retains validated transposition and batch output
+retains empty execution groups. Malformed container counts return
+`UnexpectedResult`, rather than discarding data or manufacturing placeholders.
+Introspection remains useful for metadata discovery; it is not a prerequisite
+for detecting absence or selecting an accessor safely.
+
+```rust
+let result = connection.execute_named(sql, params)?;
+let affected = result.rows_affected();
+match result.into_returned_data()? {
+    None => println!("No returned output container ({affected} affected rows)"),
+    Some(rows) => println!("{} returned rows", rows.len()),
+}
+```
+
+### Upstream changes
+
 1.  All of the database type constants have been made references in order to
     avoid the necessity of taking a reference (or a double reference when
     binding the type directly).
@@ -51,11 +89,11 @@
     results from calling
     [Statement::execute_batch()](crate::Statement::execute_batch()) instead of
     using [ExecResult](crate::ExecResult). Methods
-    [ExecResult::out_bind_data()](crate::ExecResult::out_bind_data()) and
-    [ExecBatchResult::out_bind_data()](crate::ExecBatchResult::out_bind_data())
+    [ExecResult::into_out_bind_data()](crate::ExecResult::into_out_bind_data()) and
+    [ExecBatchResult::into_out_bind_data()](crate::ExecBatchResult::into_out_bind_data())
     were added for getting [PL/SQL out bind](#batchplsql) data. The methods
-    [ExecResult::returned_data()](crate::ExecResult::returned_data()) and
-    [ExecBatchResult::returned_data()](crate::ExecBatchResult::returned_data())
+    [ExecResult::into_returned_data()](crate::ExecResult::into_returned_data()) and
+    [ExecBatchResult::into_returned_data()](crate::ExecBatchResult::into_returned_data())
     are only used for getting [DML returning data](#dmlreturning) and they are
     returned in a manner more conducive to further manipulation
     ([discussion 14](https://github.com/oracle/rust-oracledb/discussions/14)).

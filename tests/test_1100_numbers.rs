@@ -426,7 +426,7 @@ fn test_1119(
     #[case] input: i32,
     #[case] expected: i32,
 ) -> Result<(), oracledb::Error> {
-    let mut result = conn.execute_named(
+    let result = conn.execute_named(
         r#"
         declare
             value binary_integer := :input_value;
@@ -436,6 +436,12 @@ fn test_1119(
         "#,
         &[("input_value", &input), ("output_value", &0)],
     )?;
-    assert_eq!(result.out_bind_data().get::<i32>(0)?, expected);
+    assert_eq!(
+        result
+            .into_out_bind_data()?
+            .expect("expected PL/SQL OUT data")
+            .get::<i32>(0)?,
+        expected
+    );
     Ok(())
 }

@@ -8,6 +8,16 @@ in other applications.
 
 PL/SQL code can be stored in the database, and executed using rust-oracledb.
 
+`ExecResult::into_out_bind_data()` consumes the execution result and returns
+`Result<Option<Row>, Error>`. `None` means no output container was supplied;
+SQL NULL is instead read as `Option<T>` from a column of a present row.
+Read `rows_affected()` before extraction. Extract once and keep the row to
+read multiple columns. Extracting twice is rejected by Rust's ownership rules.
+Using this accessor on existing DML RETURNING output returns
+`ErrorKind::ExecutionOutputKindMismatch`. No empty placeholder row is created.
+Statement introspection is available for metadata discovery and tooling, but
+is not required to detect absent output.
+
 Examples in this chapter show single invocations using
 [Connection::execute()](crate::Connection::execute). Examples of repeated
 calls using [Connection::execute_batch()](crate::Connection::execute_batch) are
@@ -32,19 +42,22 @@ end;
 then the following Rust code can be used to call it:
 
 ```rust
-let mut result = connection.execute(
+let result = connection.execute(
     "begin myproc(:1, :2); end;",
     &[&123, &oracledb::DB_TYPE_NUMBER],
 )?;
 
-let out_val: i32 = result.out_bind_data().get(0)?;
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+let out_val: i32 = out_bind_data.get(0)?;
 
 println!("{out_val}"); // will print 246
 ```
 
 OUT bind variables are bound by passing the desired Oracle Database type, such
 as ``oracledb::DB_TYPE_NUMBER``. The OUT bind value is returned from
-[ExecResult::out_bind_data()](crate::ExecResult::out_bind_data).
+[ExecResult::into_out_bind_data()](crate::ExecResult::into_out_bind_data).
 
 See [Using Bind Variables](#bind) for information on binding.
 
@@ -72,7 +85,7 @@ then the following Rust code can be used to call it:
 ```rust
 use oracledb::OracleTimestamp;
 
-let mut result = connection.execute(
+let result = connection.execute(
     "begin :1 := myfunc(:2, :3, :4); end;",
     &[
         &oracledb::DB_TYPE_NUMBER,
@@ -82,7 +95,9 @@ let mut result = connection.execute(
     ],
 )?;
 
-let out_bind_data = result.out_bind_data();
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
 
 let return_val: i32 = out_bind_data.get(0)?;
 let out_date: OracleTimestamp = out_bind_data.get(1)?;
@@ -105,7 +120,7 @@ See [Using Bind Variables](#bind) for information on binding.
 An [anonymous PL/SQL block] can be called as shown:
 
 ```rust
-let mut result = connection.execute_named(
+let result = connection.execute_named(
     r#"
     begin
         :out_val := length(:in_val);
@@ -117,7 +132,10 @@ let mut result = connection.execute_named(
     ],
 )?;
 
-let out_val: i32 = result.out_bind_data().get(0)?;
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+let out_val: i32 = out_bind_data.get(0)?;
 
 println!("{out_val}"); // will print 15
 ```
@@ -129,7 +147,7 @@ See [Using Bind Variables](#bind) for information on binding.
 PL/SQL procedures can return query results through REF CURSOR OUT parameters.
 Bind the REF CURSOR parameter with
 [oracledb::DB_TYPE_CURSOR](crate::DB_TYPE_CURSOR), then take the returned
-[Cursor](crate::Cursor) from `ExecResult::out_bind_data()`.
+[Cursor](crate::Cursor) from `ExecResult::into_out_bind_data()`.
 
 For example, if a procedure returns a `SYS_REFCURSOR`:
 
@@ -149,12 +167,15 @@ end;
 then the following Rust code can be used to call it:
 
 ```rust
-let mut result = connection.execute(
+let result = connection.execute(
     "begin myrefcursor(:1, :2); end;",
     &[&3, &oracledb::DB_TYPE_CURSOR],
 )?;
 
-let cursor: oracledb::Cursor = result.out_bind_data().take(0)?;
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+let cursor: oracledb::Cursor = out_bind_data.take(0)?;
 
 for row_result in cursor {
     let row = row_result?;
@@ -298,13 +319,15 @@ loop {
     // Allocate a string large enough for DBMS_OUTPUT.GET_LINE's line OUT bind
     let line_hint = " ".repeat(32767);
 
-    let mut result = connection.execute(
+    let result = connection.execute(
         "begin dbms_output.get_line(:1, :2); end;",
         &[&line_hint, &0],
     )?;
 
     // Get the OUT bind values returned by the PL/SQL call
-    let out_bind_data = result.out_bind_data();
+    let Some(out_bind_data) = result.into_out_bind_data()? else {
+        return Ok(()); // No output container was supplied.
+    };
 
     // Read the line OUT bind. It can be NULL when no line is returned
     let line: Option<String> = out_bind_data.get(0)?;

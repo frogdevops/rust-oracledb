@@ -46,12 +46,16 @@ fn main() -> Result<(), oracledb::Error> {
         &[],
     )?;
 
-    let mut result = connection.execute(
+    let result = connection.execute(
         "begin :1 := rso_examples_func(:2); end;",
         &[&oracledb::DB_TYPE_NUMBER, &19],
     )?;
 
-    let return_val: i32 = result.out_bind_data().get(0)?;
+    let Some(output) = result.into_out_bind_data()? else {
+        eprintln!("expected PL/SQL OUT data");
+        return Ok(());
+    };
+    let return_val: i32 = output.get(0)?;
 
     println!("Return value: {return_val}");
 

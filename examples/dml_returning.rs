@@ -51,7 +51,7 @@ fn main() -> Result<(), oracledb::Error> {
     connection.commit()?;
 
     let dept_name = " ".repeat(100);
-    let mut result = connection.execute_named(
+    let result = connection.execute_named(
         r#"
         update rso_examples_dml_returning set
             location_id = :loc_id
@@ -66,11 +66,12 @@ fn main() -> Result<(), oracledb::Error> {
         ],
     )?;
 
-    let dept_names: Vec<String> = result
-        .returned_data()?
-        .into_iter()
-        .map(|r| r.get(0).unwrap())
-        .collect();
+    let Some(output) = result.into_returned_data()? else {
+        eprintln!("expected DML RETURNING output");
+        return Ok(());
+    };
+    let dept_names: Vec<String> =
+        output.into_iter().map(|r| r.get(0).unwrap()).collect();
 
     println!("{dept_names:?}");
 

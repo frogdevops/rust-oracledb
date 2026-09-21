@@ -85,11 +85,13 @@ fn test_1503(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     if common::skip_unless_native_boolean_supported(&conn) {
         return Ok(());
     }
-    let mut result = conn.execute_named(
+    let result = conn.execute_named(
         "begin :out_value := not :in_value; end;",
         &[("in_value", &true), ("out_value", &false)],
     )?;
-    let out_bind_data = result.out_bind_data();
+    let out_bind_data = result
+        .into_out_bind_data()?
+        .expect("expected PL/SQL OUT data");
     let out_value: bool = out_bind_data.get(0)?;
     assert!(!out_value);
     Ok(())

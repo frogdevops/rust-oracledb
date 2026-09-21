@@ -307,6 +307,9 @@ pub fn create_pool(config: PoolConfig) -> Result<Pool, Error> {
 }
 
 // User documentation
+// The guide contains contextual database snippets, not standalone doctests.
+// Keep API ownership doctests enabled without executing guide fragments.
+#[cfg(not(doctest))]
 pub mod guide {
     #![doc = include_str!("../doc/table_of_contents.md")]
     #![doc = include_str!("../doc/introduction.md")]

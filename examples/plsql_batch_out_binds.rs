@@ -53,12 +53,16 @@ fn main() -> Result<(), oracledb::Error> {
         &[&300, &oracledb::DB_TYPE_NUMBER],
     ]);
 
-    let mut result = connection.execute_batch(
+    let result = connection.execute_batch(
         "begin rso_examples_batch_proc(:1, :2); end;",
         params,
     )?;
 
-    for row in result.out_bind_data() {
+    let Some(output) = result.into_out_bind_data()? else {
+        eprintln!("expected PL/SQL OUT data");
+        return Ok(());
+    };
+    for row in output {
         let p2: i32 = row.get(0)?;
         println!("{p2}");
     }

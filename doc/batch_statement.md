@@ -84,7 +84,7 @@ improve performance when the same PL/SQL block needs to be executed multiple
 times with different bind values. The method returns an
 [`ExecBatchResult`](crate::ExecBatchResult), which provides the total number of
 affected rows and any output bind values through
-`ExecBatchResult::out_bind_data()`.
+`ExecBatchResult::into_out_bind_data()`.
 
 **IN Binds**
 
@@ -108,9 +108,10 @@ connection.execute_batch(
 PL/SQL OUT bind variables are supported. Applications do not set the bind
 direction explicitly. During execution, rust-oracledb reads the bind direction
 reported by Oracle Database; any bind reported as non-input is returned through
-`ExecBatchResult::out_bind_data()`.
+`ExecBatchResult::into_out_bind_data()`.
 
-For batch execution, `out_bind_data()` returns a `Vec<Row>`. Each row contains
+For batch execution, `into_out_bind_data()` consumes the result and returns
+`Result<Option<Vec<Row>>, Error>`. When output is present, each row contains
 the output bind values for one execution, in the same order as the input bind
 values.
 
@@ -130,12 +131,15 @@ This can be called in rust-oracledb using positional binds like:
 
 ```rust
 for p1 in [100, 200, 300] {
-    let mut result = connection.execute(
+    let result = connection.execute(
         "begin myproc(:1, :2); end;",
         &[&p1, &oracledb::DB_TYPE_NUMBER],
     )?;
 
-    let p2: i32 = result.out_bind_data().get(0)?;
+    let Some(out_bind_data) = result.into_out_bind_data()? else {
+        return Ok(()); // No output container was supplied.
+    };
+    let p2: i32 = out_bind_data.get(0)?;
 
     println!("{p2}");
 }
@@ -155,7 +159,7 @@ The equivalent code using named binds is:
 let data = [100, 200, 300];
 
 for p1 in data {
-    let mut result = connection.execute_named(
+    let result = connection.execute_named(
         "begin myproc(:p1, :p2); end;",
         &[
             ("p1", &p1),
@@ -163,7 +167,10 @@ for p1 in data {
         ],
     )?;
 
-    let p2: i32 = result.out_bind_data().get(0)?;
+    let Some(out_bind_data) = result.into_out_bind_data()? else {
+        return Ok(()); // No output container was supplied.
+    };
+    let p2: i32 = out_bind_data.get(0)?;
 
     println!("{p2}");
 }
@@ -180,7 +187,8 @@ This prints the following output:
 When the same PL/SQL block is executed with multiple sets of bind values,
 `Connection::execute_batch()` returns an
 [`ExecBatchResult`](crate::ExecBatchResult). Output bind values can be read
-with `ExecBatchResult::out_bind_data()`, which returns a `Vec<Row>` containing
+with `ExecBatchResult::into_out_bind_data()`, which returns a
+`Result<Option<Vec<Row>>, Error>` containing, when present,
 one row for each execution.
 
 ```rust
@@ -190,12 +198,15 @@ let params = oracledb::BindParameters::Slice(&[
     &[&300, &oracledb::DB_TYPE_NUMBER],
 ]);
 
-let mut result = connection.execute_batch(
+let result = connection.execute_batch(
     "begin rso_examples_batch_proc(:1, :2); end;",
     params,
 )?;
 
-for row in result.out_bind_data() {
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+for row in out_bind_data {
     let p2: i32 = row.get(0)?;
     println!("{p2}");
 }
@@ -213,7 +224,7 @@ This prints the following output:
 
 PL/SQL IN/OUT bind variables are also supported. Pass the initial value as
 the bind value. The modified value is not written back to the original Rust
-variable; read it from `ExecResult::out_bind_data()` after execution.
+variable; read it from `ExecResult::into_out_bind_data()` after execution.
 
 ``` sql
 create or replace procedure myproc2 (p1 in number, p2 in out varchar2) as
@@ -230,12 +241,15 @@ let data = [(440, "Gregory"), (550, "Haley"), (660, "Ian")];
 let mut outvals = Vec::new();
 
 for (p1, p2) in data {
-    let mut result = connection.execute(
+    let result = connection.execute(
         "begin myproc2(:1, :2); end;",
          &[&p1, &p2],
     )?;
 
-    let outval: String = result.out_bind_data().get(0)?;
+    let Some(out_bind_data) = result.into_out_bind_data()? else {
+        return Ok(()); // No output container was supplied.
+    };
+    let outval: String = out_bind_data.get(0)?;
 
     outvals.push(outval);
 }
@@ -256,7 +270,7 @@ let data = [(440, "Gregory"), (550, "Haley"), (660, "Ian")];
 let mut outvals = Vec::new();
 
 for (p1, p2) in data {
-    let mut result = connection.execute_named(
+    let result = connection.execute_named(
         "begin myproc2(:p1, :p2); end;",
         &[
             ("p1", &p1),
@@ -264,7 +278,10 @@ for (p1, p2) in data {
         ],
     )?;
 
-    let outval: String = result.out_bind_data().get(0)?;
+    let Some(out_bind_data) = result.into_out_bind_data()? else {
+        return Ok(()); // No output container was supplied.
+    };
+    let outval: String = out_bind_data.get(0)?;
 
     outvals.push(outval);
 }
@@ -318,12 +335,13 @@ DML RETURNING values can be collected either with repeated
 [Connection::execute()](crate::Connection::execute) calls or with
 [Connection::execute_batch()](crate::Connection::execute_batch).
 
-For a single execution, `ExecResult::returned_data()` returns a `Vec<Row>`.
-For batch execution, `ExecBatchResult::returned_data()` returns a
-`Vec<Vec<Row>>`, grouping returned rows by batch execution.
+For a single execution, `ExecResult::into_returned_data()` consumes the result
+and returns `Result<Option<Vec<Row>>, Error>`.
+For batch execution, `ExecBatchResult::into_returned_data()` returns a
+`Result<Option<Vec<Vec<Row>>>, Error>`, grouping returned rows by batch execution.
 
 The following example uses repeated `Connection::execute()` calls. For each
-execution, `ExecResult::returned_data()` returns a `Vec<Row>` containing the
+execution, the present output from `ExecResult::into_returned_data()` contains the
 rows returned by that DML statement. If, instead of merely deleting the rows
 as shown in the previous example, you also wanted to know some information
 about each of the rows that were deleted, you can use the following code:
@@ -332,14 +350,17 @@ about each of the rows that were deleted, you can use the following code:
 let parent_ids_to_delete = [20, 30, 50];
 
 for parent_id in parent_ids_to_delete {
-    let mut result = connection.execute(
+    let result = connection.execute(
     "delete from ChildTable
      where ParentId = :1
      returning ChildId into :2",
     &[&parent_id, &oracledb::DB_TYPE_NUMBER],
 )?;
 
-    let rows = result.returned_data();
+    let Some(returned_data) = result.into_returned_data()? else {
+        return Ok(()); // No output container was supplied.
+    };
+    let rows = returned_data;
 
     if rows.is_empty() {
         println!(
@@ -370,19 +391,20 @@ Child IDs deleted for parent ID 50 are [4, 5]
 ```
 
 The `DB_TYPE_NUMBER` bind is a type hint for the returned ChildId values. The
-actual returned values are read from `result.returned_data()`.
+actual returned values are read from `result.into_returned_data()`.
 
 DML RETURNING can also be used with
 [Connection::execute_batch()](crate::Connection::execute_batch). The returned
 values are available through
-[`ExecBatchResult::returned_data()`](crate::ExecBatchResult::returned_data).
-For batch execution, `returned_data()` returns a `Vec<Vec<Row>>`. The outer
+[`ExecBatchResult::into_returned_data()`](crate::ExecBatchResult::into_returned_data).
+For batch execution, `into_returned_data()` returns
+`Result<Option<Vec<Vec<Row>>>, Error>`. For present output, the outer
 vector contains one entry for each execution in the batch, in input order. Each
 inner vector contains the rows returned by that execution and may be empty when
 the execution affects no rows.
 
 The following example uses `Connection::execute_batch()` with the same
-`DELETE ... RETURNING` statement. `ExecBatchResult::returned_data()` returns
+`DELETE ... RETURNING` statement. `ExecBatchResult::into_returned_data()` returns
 the returned rows grouped by batch execution.
 
 ```rust
@@ -394,14 +416,17 @@ let params = oracledb::BindParameters::Slice(&[
     &[&50, &oracledb::DB_TYPE_NUMBER],
 ]);
 
-let mut result = connection.execute_batch(
+let result = connection.execute_batch(
     "delete from ChildTable
      where ParentId = :1
      returning ChildId into :2",
     params,
 )?;
 
-for (parent_id, rows) in parent_ids.into_iter().zip(result.returned_data()) {
+let Some(returned_data) = result.into_returned_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+for (parent_id, rows) in parent_ids.into_iter().zip(returned_data) {
     let child_ids: Vec<i32> = rows
         .into_iter()
         .map(|row| row.get(0))

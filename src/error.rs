@@ -41,6 +41,11 @@ use crate::response::ResponseLocation;
 #[derive(Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// The extraction method does not match the execution output.
+    ExecutionOutputKindMismatch {
+        expected: &'static str,
+        actual: &'static str,
+    },
     ArrowOperation,
     CallTimeoutExceeded,
     ColumnTruncated(usize, usize),
@@ -181,6 +186,9 @@ impl From<arrow_schema::ArrowError> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0.kind {
+            ErrorKind::ExecutionOutputKindMismatch { expected, actual } => {
+                write!(fmt, "expected {expected} output, found {actual} output")?
+            }
             ErrorKind::ArrowOperation => {
                 fmt.write_str("Arrow operation failed")?
             }
@@ -720,6 +728,16 @@ impl Error {
 
     pub(crate) fn unexpected_result() -> Error {
         Error::new(ErrorKind::UnexpectedResult, None)
+    }
+
+    pub(crate) fn output_kind_mismatch(
+        expected: &'static str,
+        actual: &'static str,
+    ) -> Error {
+        Error::new(
+            ErrorKind::ExecutionOutputKindMismatch { expected, actual },
+            None,
+        )
     }
 
     pub(crate) fn unknown_server_side_piggyback(opcode: u8) -> Error {

@@ -52,10 +52,14 @@ fn main() -> Result<(), oracledb::Error> {
     let mut outvals = Vec::new();
 
     for (p1, p2) in data {
-        let mut result = connection
+        let result = connection
             .execute("begin rso_examples_proc(:1, :2); end;", &[&p1, &p2])?;
 
-        let outval: String = result.out_bind_data().get(0)?;
+        let Some(output) = result.into_out_bind_data()? else {
+            eprintln!("expected PL/SQL OUT data");
+            return Ok(());
+        };
+        let outval: String = output.get(0)?;
 
         outvals.push(outval);
     }
@@ -66,12 +70,16 @@ fn main() -> Result<(), oracledb::Error> {
     let mut outvals = Vec::new();
 
     for (p1, p2) in data {
-        let mut result = connection.execute_named(
+        let result = connection.execute_named(
             "begin rso_examples_proc(:p1, :p2); end;",
             &[("p1", &p1), ("p2", &p2)],
         )?;
 
-        let outval: String = result.out_bind_data().get(0)?;
+        let Some(output) = result.into_out_bind_data()? else {
+            eprintln!("expected PL/SQL OUT data");
+            return Ok(());
+        };
+        let outval: String = output.get(0)?;
 
         outvals.push(outval);
     }

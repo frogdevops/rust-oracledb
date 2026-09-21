@@ -160,18 +160,21 @@ For example, an OUT `NUMBER` parameter can be bound with
 [oracledb::DB_TYPE_NUMBER](crate::DB_TYPE_NUMBER):
 
 ```rust
-let mut result = connection.execute(
+let result = connection.execute(
     "begin myproc(:1, :2); end;",
     &[&123, &oracledb::DB_TYPE_NUMBER],
 )?;
 
-let out_val: i32 = result.out_bind_data().get(0)?;
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+let out_val: i32 = out_bind_data.get(0)?;
 ```
 
 Named binds work the same way:
 
 ```rust
-let mut result = connection.execute_named(
+let result = connection.execute_named(
     "begin myproc(:input_value, :output_value); end;",
     &[
         ("input_value", &123),
@@ -179,7 +182,10 @@ let mut result = connection.execute_named(
     ],
 )?;
 
-let out_val: i32 = result.out_bind_data().get(0)?;
+let Some(out_bind_data) = result.into_out_bind_data()? else {
+    return Ok(()); // No output container was supplied.
+};
+let out_val: i32 = out_bind_data.get(0)?;
 ```
 
 ## <a name="bindnull"></a> 5.5 Binding Null Values
@@ -221,7 +227,7 @@ strings.
 When a RETURNING clause is used with a DML statement like UPDATE, INSERT, or
 DELETE, the values are returned to the application through the use of OUT bind
 variables. In rust-oracledb, returned values are read from
-[`ExecResult::returned_data()`](crate::ExecResult::returned_data).
+[`ExecResult::into_returned_data()`](crate::ExecResult::into_returned_data).
 
 Since a DML statement can affect multiple rows, a RETURNING INTO value is
 fetched as a `Vec<T>`.
@@ -229,7 +235,7 @@ fetched as a `Vec<T>`.
 Consider the following example:
 
 ```rust
-let mut result = connection.execute_named(
+let result = connection.execute_named(
     r#"
     update departments set
         location_id = :loc_id
@@ -243,7 +249,9 @@ let mut result = connection.execute_named(
     ],
 )?;
 
-let returned_data = result.returned_data();
+let Some(returned_data) = result.into_returned_data()? else {
+    return Ok(()); // No output container was supplied.
+};
 let dept_names: Vec<String> = returned_data
     .iter()
     .map(|r| r.get(0).unwrap())

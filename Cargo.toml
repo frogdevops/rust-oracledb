@@ -57,7 +57,7 @@ whoami = "2.1.2"
 rstest = "0.26.1"
 
 [lib]
-doctest = false
+doctest = true
 
 [[example]]
 name = "simple_arrow_query"

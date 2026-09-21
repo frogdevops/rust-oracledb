@@ -48,19 +48,27 @@ fn main() -> Result<(), oracledb::Error> {
     )?;
 
     // positional bind variables
-    let mut result = connection.execute(
+    let result = connection.execute(
         "begin rso_examples_proc(:1, :2); end;",
         &[&100, &oracledb::DB_TYPE_NUMBER],
     )?;
-    let p2: i32 = result.out_bind_data().get(0)?;
+    let Some(output) = result.into_out_bind_data()? else {
+        eprintln!("expected PL/SQL OUT data");
+        return Ok(());
+    };
+    let p2: i32 = output.get(0)?;
     println!("{p2}");
 
     // named bind variables
-    let mut result = connection.execute_named(
+    let result = connection.execute_named(
         "begin rso_examples_proc(:p1, :p2); end;",
         &[("p1", &200), ("p2", &oracledb::DB_TYPE_NUMBER)],
     )?;
-    let p2: i32 = result.out_bind_data().get(0)?;
+    let Some(output) = result.into_out_bind_data()? else {
+        eprintln!("expected PL/SQL OUT data");
+        return Ok(());
+    };
+    let p2: i32 = output.get(0)?;
     println!("{p2}");
 
     Ok(())

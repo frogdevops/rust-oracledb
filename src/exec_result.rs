@@ -33,16 +33,85 @@ use std::sync::Arc;
 use crate::error::Error;
 use crate::metadata::Metadata;
 use crate::response::Response;
-use crate::row::Row;
+use crate::row::{DbRow, Row};
 use crate::statement::CachedStatement;
 use crate::transpose::{RawColumnarData, TransposeData};
 
-/// Represents the result returned by the database when calling
-/// [Connection::execute()](`crate::Connection::execute()`) or
-/// [Connection::execute_named()](`crate::Connection::execute_named()`).
+// Keep wire containers until extraction to validate their count.
+enum ExecutionOutput {
+    None,
+    PlSql(Vec<DbRow>),
+    DmlReturning(Vec<DbRow>),
+}
+
+impl ExecutionOutput {
+    fn new(statement: &CachedStatement, resp: &mut Response) -> Self {
+        let rows = resp.take_rows();
+        if statement.out_metadata().is_empty() {
+            return Self::None;
+        }
+        match rows {
+            Some(rows) if statement.is_plsql() => Self::PlSql(rows),
+            Some(rows) if statement.is_dml_returning() => {
+                Self::DmlReturning(rows)
+            }
+            _ => Self::None,
+        }
+    }
+
+    fn into_rows(
+        self,
+        plsql: bool,
+        count: usize,
+    ) -> Result<Option<Vec<DbRow>>, Error> {
+        let rows = match (self, plsql) {
+            (Self::None, _) => return Ok(None),
+            (Self::PlSql(rows), true) | (Self::DmlReturning(rows), false) => {
+                rows
+            }
+            (Self::PlSql(_), false) => {
+                return Err(Error::output_kind_mismatch(
+                    "DML RETURNING",
+                    "PL/SQL",
+                ));
+            }
+            (Self::DmlReturning(_), true) => {
+                return Err(Error::output_kind_mismatch(
+                    "PL/SQL",
+                    "DML RETURNING",
+                ));
+            }
+        };
+        if rows.len() != count {
+            return Err(Error::unexpected_result());
+        }
+        Ok(Some(rows))
+    }
+}
+
+/// Result of a single execution. Read counts before consuming output.
+/// Extraction consumes the result even on error. Absence is None; SQL NULL
+/// is represented by an optional value within an existing row.
+///
+/// ```
+/// fn extract_once(result: oracledb::ExecResult) -> Result<(), oracledb::Error> {
+///     let affected = result.rows_affected();
+///     if let Some(row) = result.into_out_bind_data()? {
+///         let value: Option<String> = row.get(0)?;
+///     }
+///     Ok(())
+/// }
+/// ```
+///
+/// ```compile_fail,E0382
+/// fn extract_twice(result: oracledb::ExecResult) {
+///     let _ = result.into_out_bind_data();
+///     let _ = result.into_out_bind_data();
+/// }
+/// ```
 pub struct ExecResult {
     column_info: Arc<Vec<Metadata>>,
-    returned_data: Option<RawColumnarData>,
+    output: ExecutionOutput,
     rows_affected: u64,
 }
 
@@ -50,63 +119,72 @@ impl ExecResult {
     pub(crate) fn new(
         statement: &CachedStatement,
         resp: &mut Response,
-    ) -> ExecResult {
-        ExecResult {
+    ) -> Self {
+        Self {
             column_info: Arc::new(statement.out_metadata().to_vec()),
-            returned_data: resp
-                .take_rows()
-                .and_then(|mut v| v.pop())
-                .map(RawColumnarData::new),
+            output: ExecutionOutput::new(statement, resp),
             rows_affected: resp.get_rowcount(),
         }
     }
 
-    /// Returns the number of rows affected by the execution of the statement.
+    /// Returns the affected-row count. Call before consuming the result.
     pub fn rows_affected(&self) -> u64 {
         self.rows_affected
     }
 
-    /// Returns data returned by the database as OUT variables (PL/SQL or
-    /// RETURNING statements). This transfers ownership of the returned data to
-    /// the caller.
-    pub fn returned_data(&mut self) -> Result<Vec<Row>, Error> {
-        if let Some(raw_data) = self.returned_data.take() {
-            raw_data.transpose(&self.column_info)
-        } else {
-            Ok(Vec::new())
-        }
+    /// Consumes PL/SQL OUT data, retaining array-valued columns.
+    /// Returns None if no container was supplied. Existing DML RETURNING
+    /// output causes an ExecutionOutputKindMismatch error.
+    pub fn into_out_bind_data(self) -> Result<Option<Row>, Error> {
+        Ok(self
+            .output
+            .into_rows(true, 1)?
+            .map(|mut rows| Row::new(&self.column_info, rows.pop().unwrap())))
     }
 
-    /// Returns the single row returned by the database as OUT variables
-    /// (PL/SQL or RETURNING statements). If no rows were returned, a
-    /// NoDataFound error is returned instead. If more than 1 row was returned,
-    /// an OutOfRange error is returned. This transfers ownership of the
-    /// returned data to the caller.
-    pub fn returned_row(&mut self) -> Result<Row, Error> {
-        let rows = self.returned_data()?;
+    /// Consumes and transposes DML RETURNING data.
+    /// None means no container was supplied; Some(vec![]) means a supplied
+    /// container contained zero rows. PL/SQL output causes an
+    /// ExecutionOutputKindMismatch error; malformed containers return an error.
+    pub fn into_returned_data(self) -> Result<Option<Vec<Row>>, Error> {
+        self.output
+            .into_rows(false, 1)?
+            .map(|mut rows| {
+                RawColumnarData::new(rows.pop().unwrap())
+                    .transpose(&self.column_info)
+            })
+            .transpose()
+    }
+
+    /// Consumes exactly one DML RETURNING row. Absence or zero rows produces
+    /// NoDataFound; multiple rows produce OutOfRange.
+    pub fn into_returned_row(self) -> Result<Row, Error> {
+        let rows = self
+            .into_returned_data()?
+            .ok_or_else(Error::no_data_found)?;
         match rows.len() {
             0 => Err(Error::no_data_found()),
             1 => Ok(rows.into_iter().next().unwrap()),
             n => Err(Error::out_of_range(format!(
-                "expected exactly 1 returned row, but found {}",
-                n
+                "expected exactly 1 returned row, but found {n}"
             ))),
         }
     }
-
-    /// Returns data returned by the database as OUT variables for PL/SQL. This
-    /// transfers ownership of the data to the caller.
-    pub fn out_bind_data(&mut self) -> Row {
-        self.returned_row().unwrap_or_else(|_| Row::new_empty())
-    }
 }
 
-/// Represents the result returned by the database when calling
-/// [Connection::execute_batch()](`crate::Connection::execute_batch()`) or
-/// [Statement::execute_batch()](`crate::Statement::execute_batch()`).
+/// Result of batch execution. Extraction consumes the result.
+/// Present output must contain one container per execution. Empty DML groups
+/// retain their position; missing containers produce an error.
+///
+/// ```compile_fail,E0382
+/// fn extract_twice(result: oracledb::ExecBatchResult) {
+///     let _ = result.into_returned_data();
+///     let _ = result.into_returned_data();
+/// }
+/// ```
 pub struct ExecBatchResult {
     column_info: Arc<Vec<Metadata>>,
-    returned_data: Option<Vec<RawColumnarData>>,
+    output: ExecutionOutput,
     num_execs: usize,
     rows_affected: u64,
 }
@@ -116,54 +194,44 @@ impl ExecBatchResult {
         statement: &CachedStatement,
         num_execs: usize,
         resp: &mut Response,
-    ) -> ExecBatchResult {
-        ExecBatchResult {
+    ) -> Self {
+        Self {
             column_info: Arc::new(statement.out_metadata().to_vec()),
-            returned_data: resp
-                .take_rows()
-                .map(|rows| rows.into_iter().map(RawColumnarData::new).collect()),
+            output: ExecutionOutput::new(statement, resp),
             num_execs,
             rows_affected: resp.get_rowcount(),
         }
     }
 
-    /// Returns the total number of rows affected by the execution of the batch.
+    /// Returns the total affected-row count before extraction.
     pub fn rows_affected(&self) -> u64 {
         self.rows_affected
     }
 
-    /// Returns data returned by the database as OUT variables (PL/SQL or
-    /// RETURNING statements) for each execution in the batch. This transfers
-    /// ownership of the returned data to the caller.
-    pub fn returned_data(&mut self) -> Result<Vec<Vec<Row>>, Error> {
-        if let Some(batch_data) = self.returned_data.take() {
-            batch_data.transpose(&self.column_info)
-        } else {
-            Ok(Vec::new())
-        }
+    /// Consumes PL/SQL OUT rows in execution order without transposition.
+    /// Returns None for absent output, or an error for a wrong output kind or
+    /// an unexpected container count.
+    pub fn into_out_bind_data(self) -> Result<Option<Vec<Row>>, Error> {
+        Ok(self.output.into_rows(true, self.num_execs)?.map(|rows| {
+            rows.into_iter()
+                .map(|row| Row::new(&self.column_info, row))
+                .collect()
+        }))
     }
 
-    /// Returns data returned by the database as OUT variables in PL/SQL. This
-    /// transfers ownership of the returned data to the caller.
-    pub fn out_bind_data(&mut self) -> Vec<Row> {
-        self.returned_data()
-            .ok()
-            .map(|batches| {
-                batches
-                    .into_iter()
-                    .map(|mut rows| {
-                        if rows.len() == 1 {
-                            rows.pop().unwrap()
-                        } else {
-                            Row::new_empty()
-                        }
+    /// Consumes DML RETURNING rows grouped in execution order.
+    /// Empty groups are retained. Returns None for absent output, or an error
+    /// for a wrong output kind, malformed data, or missing execution containers.
+    pub fn into_returned_data(self) -> Result<Option<Vec<Vec<Row>>>, Error> {
+        self.output
+            .into_rows(false, self.num_execs)?
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| {
+                        RawColumnarData::new(row).transpose(&self.column_info)
                     })
                     .collect()
             })
-            .unwrap_or_else(|| {
-                std::iter::repeat_with(Row::new_empty)
-                    .take(self.num_execs)
-                    .collect()
-            })
+            .transpose()
     }
 }

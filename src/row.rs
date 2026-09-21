@@ -211,14 +211,6 @@ impl Row {
         }
     }
 
-    /// Creates a new empty row with no column values or data.
-    pub(crate) fn new_empty() -> Self {
-        Self {
-            column_info: Arc::new(vec![]),
-            column_values: DbRow::new(vec![]),
-        }
-    }
-
     /// Returns column information for the row.
     pub fn columns(&self) -> &[Metadata] {
         &self.column_info
@@ -270,7 +262,7 @@ impl Row {
     }
 
     /// Returns the array at the given column index as a vector.
-    pub fn take_array<'a, T> (
+    pub fn take_array<'a, T>(
         &'a mut self,
         col_index: impl ColumnIndex,
     ) -> Result<Vec<T>, Error>

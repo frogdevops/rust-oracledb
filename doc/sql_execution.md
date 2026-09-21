@@ -1,5 +1,12 @@
 # <a name="sqlexecution"></a> 3. Executing SQL
 
+Execution output is extracted by consuming the result. For DML RETURNING, use
+`into_returned_data()` for `Result<Option<Vec<Row>>, Error>` or
+`into_returned_row()` to require exactly one row. Read `rows_affected()` first.
+Absent output is `None`; a present container with zero rows is `Some(vec![])`.
+PL/SQL output uses `into_out_bind_data()` instead. Introspection can describe
+the statement, but is not required for safe extraction.
+
 Executing SQL statements is the primary way in which a Rust application
 communicates with Oracle Database. Statements include queries, Data
 Manipulation Language (DML), and Data Definition Language (DDL). A few other

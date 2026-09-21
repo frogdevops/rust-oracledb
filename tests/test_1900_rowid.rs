@@ -98,13 +98,15 @@ fn test_1903(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         "test_1903_returning",
         "value varchar2(30)",
     )?;
-    let mut result = conn.execute_named(
+    let result = conn.execute_named(
         "insert into test_1903_returning (value) values (:value) \
          returning rowid into :out_rowid",
         &[("value", &"rowid value"), ("out_rowid", &" ".repeat(18))],
     )?;
     assert_eq!(result.rows_affected(), 1);
-    let returned = result.returned_data()?;
+    let returned = result
+        .into_returned_data()?
+        .expect("expected DML RETURNING output");
     assert_eq!(returned.len(), 1);
 
     // 1. Test scalar lookup by name:
