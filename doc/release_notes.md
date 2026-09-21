@@ -64,6 +64,9 @@ match result.into_returned_data()? {
 1.  Fixed encoding of Oracle NUMBER data for values with an odd number of
     leading zeroes after the decimal point
     ([issue 21](https://github.com/oracle/rust-oracledb/issues/21)).
+1.  Fixed bug processing duplicate column values when the number of prefetch
+    rows is greater than two
+    ([issue 27](https://github.com/oracle/rust-oracledb/issues/27)).
 1.  Ensure that connections returned from a pool always start with a call
     timeout of None.
 

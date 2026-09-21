@@ -393,6 +393,7 @@ impl CachedStatement {
         let _dcbmnpr = resp.read_ub4()?;
         let _dcbmxpr = resp.read_ub4()?;
         let _dcbqcky = resp.read_bytes_with_double_length()?;
+        resp.set_num_columns(self.out_metadata.len());
         Ok(())
     }
 
