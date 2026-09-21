@@ -117,28 +117,35 @@ fn test_1103(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
 #[rstest]
 /// test fetching duplicate values
 fn test_1104(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
-    let cursor = conn.query(
-        r#"
-        select 1104 from dual
-        union all
-        select 1104 from dual
-        union all
-        select 1104 from dual
-        union all
-        select 1104 from dual
-        union all
-        select 1104 from dual
-        "#,
-        &[],
-    )?;
+    let cursor = conn
+        .statement(
+            r#"
+            select 1104 from dual
+            union all
+            select 1104 from dual
+            union all
+            select 1104 from dual
+            union all
+            select 1104 from dual
+            union all
+            select 1104 from dual
+            union all
+            select 1104 from dual
+            union all
+            select 1104 from dual
+            "#,
+        )?
+        .prefetch_rows(3)
+        .build()?
+        .query(&[])?;
     let mut num_rows = 0;
     for row in cursor {
         let row = row?;
         num_rows += 1;
-        let fetched_val: oracledb::OracleNumber = row.get(0)?;
-        assert_eq!(fetched_val.to_string(), "1104");
+        let fetched_val: u16 = row.get(0)?;
+        assert_eq!(fetched_val, 1104);
     }
-    assert_eq!(num_rows, 5);
+    assert_eq!(num_rows, 7);
     Ok(())
 }
 
