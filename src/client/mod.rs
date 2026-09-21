@@ -696,7 +696,7 @@ impl Client {
     /// out of the pool.
     pub(crate) fn begin_request(&mut self) {
         if !self.pool_id.is_empty() && self.caps.supports_request_boundaries() {
-            self.pending_session_state =
+            self.pending_session_state |=
                 constants::TTC_SESSION_STATE_REQUEST_BEGIN;
             self.in_request = true;
         }
