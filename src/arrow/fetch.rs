@@ -28,6 +28,9 @@
 // Defines support for fetching query results as Arrow record batches.
 //-----------------------------------------------------------------------------
 
+use std::collections::VecDeque;
+use std::sync::Arc;
+
 use arrow_array::builder::ArrayBuilder;
 use arrow_array::builder::make_builder;
 use arrow_array::builder::{
@@ -39,14 +42,16 @@ use arrow_array::builder::{
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
 
 use crate::bind_params::BindParameters;
+use crate::client::Client;
+use crate::client::ClientRef;
 use crate::constants;
-use crate::cursor::Cursor;
 use crate::error::Error;
 use crate::metadata::Metadata;
 use crate::ora_type::OracleNumber;
 use crate::ora_type::OracleTimestamp;
+use crate::row::DbRow;
 use crate::row::Row;
-use crate::statement::StatementHolder;
+use crate::statement::CachedStatement;
 
 /// Returns the default schema to use for fetching data in the Arrow format.
 fn default_schema(columns: &[Metadata]) -> Result<Schema, Error> {
@@ -102,22 +107,41 @@ fn default_type(col: &Metadata) -> Result<DataType, Error> {
 /// Performs a query with one or more sets of parameters and returns a single
 /// RecordBatch containing all of the data.
 pub(crate) fn query_single_batch(
-    holder: StatementHolder,
+    client: &mut Client,
+    statement: &mut CachedStatement,
+    client_ref: &ClientRef,
     params: BindParameters,
 ) -> Result<arrow_array::RecordBatch, Error> {
     // perform first query to determine the schema
-    let mut cursor = Cursor::new(holder);
-    cursor.execute(params.slice(0, 1))?;
-    let mut creator = RecordBatchCreator::new(cursor.columns())?;
-    for row in cursor.by_ref() {
-        creator.add_row(&row?)?;
-    }
-
-    // perform any other queries and continue appending to the RecordBatch
-    for index in 1..params.num_rows() {
-        cursor.execute(params.slice(index, 1))?;
-        for row in cursor.by_ref() {
-            creator.add_row(&row?)?;
+    let mut last_row: Option<DbRow> = None;
+    let mut response =
+        client.execute(statement, client_ref, params.slice(0, 1), false)?;
+    let metadata = statement.out_metadata().to_vec();
+    let mut creator = RecordBatchCreator::new(&metadata)?;
+    let column_info = Arc::new(metadata);
+    for index in 0..params.num_rows() {
+        if index > 0 {
+            response = client.execute(
+                statement,
+                client_ref,
+                params.slice(index, 1),
+                false,
+            )?;
+        }
+        loop {
+            if let Some(rows) = response.take_rows() {
+                let mut rows: VecDeque<DbRow> = rows.into();
+                while let Some(row) = rows.pop_front() {
+                    if rows.is_empty() {
+                        last_row = Some(row.clone());
+                    }
+                    creator.add_row(&Row::new(&column_info, row))?;
+                }
+            }
+            if response.is_end_of_fetch() {
+                break;
+            }
+            response = client.fetch(statement, client_ref, last_row.take())?;
         }
     }
     creator.create_batch()

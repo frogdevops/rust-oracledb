@@ -35,6 +35,7 @@ use std::mem;
 use std::net::SocketAddr;
 use std::net::TcpStream;
 
+use crate::bind_params::BindParameters;
 use crate::config::Address;
 use crate::config::Config;
 use crate::config::Description;
@@ -47,7 +48,9 @@ use crate::messages::AuthMessage;
 use crate::messages::ConnectMessage;
 use crate::messages::DataTypesMessage;
 use crate::messages::EofMessage;
+use crate::messages::ExecuteMessage;
 use crate::messages::FastAuthMessage;
+use crate::messages::FetchMessage;
 use crate::messages::FlushOutBindsMessage;
 use crate::messages::LogoffMessage;
 use crate::messages::MarkerMessage;
@@ -56,6 +59,7 @@ use crate::messages::ProtocolMessage;
 use crate::messages::RollbackMessage;
 use crate::packet::Packet;
 use crate::response::Response;
+use crate::row::DbRow;
 use crate::statement::CachedStatement;
 use crate::statement::StatementCache;
 use crate::statement::StatementOptions;
@@ -722,6 +726,60 @@ impl Client {
             self.pending_session_state = 0;
         }
         Ok(())
+    }
+
+    /// Executes the given statement and returns a response. At this point
+    /// binds have been checked and transformed (if needed) into the sequence
+    /// required by the server. Statements that require single execution are
+    /// performed once first before subsequent iterations are performed as a
+    /// batch.
+    pub(crate) fn execute(
+        &mut self,
+        statement: &mut CachedStatement,
+        client_ref: &ClientRef,
+        params: BindParameters,
+        parse_only: bool,
+    ) -> Result<Response, Error> {
+        if params.num_rows() > 1 && statement.requires_single_execute() {
+            let mut initial_resp = self.execute(
+                statement,
+                client_ref,
+                params.slice(0, 1),
+                false,
+            )?;
+            let mut final_resp = self.execute(
+                statement,
+                client_ref,
+                params.slice(1, params.num_rows() - 1),
+                false,
+            )?;
+            final_resp.transfer_info(&mut initial_resp);
+            Ok(final_resp)
+        } else {
+            let mut message =
+                ExecuteMessage::new(statement, params, parse_only);
+            let mut response = self.process_message(&mut message)?;
+            if statement.is_query() {
+                response.finalize_rows(client_ref, statement.out_metadata());
+                if statement.requires_define() {
+                    statement.clear_requires_define();
+                }
+            }
+            Ok(response)
+        }
+    }
+
+    /// Performs a fetch and returns the database response.
+    pub(crate) fn fetch(
+        &mut self,
+        statement: &CachedStatement,
+        client_ref: &ClientRef,
+        last_row: Option<DbRow>,
+    ) -> Result<Response, Error> {
+        let mut message = FetchMessage::new(statement, last_row);
+        let mut response = self.process_message(&mut message)?;
+        response.finalize_rows(client_ref, statement.out_metadata());
+        Ok(response)
     }
 
     /// Returns the call timeout set on the connection or an error if the

@@ -23,9 +23,9 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// row_get_take.rs
+// statement_building.rs
 //
-// Shows the use of Row::columns(), Row::get() and Row::take().
+// Shows building and inspecting a statement.
 //-----------------------------------------------------------------------------
 
 mod common;
@@ -34,36 +34,45 @@ fn main() -> Result<(), oracledb::Error> {
     let config = common::get_sample_config()?;
     let connection = oracledb::connect(config)?;
 
-    let _guard = common::create_table(
-        &connection,
-        "rso_examples_row_get_take",
-        "title varchar2(100)",
-    )?;
-    connection.execute(
-        "insert into rso_examples_row_get_take values (:1)",
-        &[&"Learning rust-oracledb"],
-    )?;
-    connection.commit()?;
+    let sql = "select user from dual";
 
-    let mut row = connection
-        .query_row("select title from rso_examples_row_get_take", &[])?;
+    let mut statement = connection
+        .statement(sql)?
+        .prefetch_rows(1)
+        .fetch_array_size(10)
+        .build()?;
 
-    // columns() returns metadata for the columns in the row
-    for column in row.columns() {
-        println!("column: {} {}", column.name(), column.data_type());
+    println!("SQL: {}", statement.sql());
+    println!("Bind names: {:?}", statement.bind_names());
+    println!("Is query: {}", statement.is_query());
+    println!("Is DML: {}", statement.is_dml());
+    println!("Is DDL: {}", statement.is_ddl());
+    println!("Is PL/SQL: {}", statement.is_plsql());
+    println!("Is DML returning: {}", statement.is_dml_returning());
+    println!(
+        "Fully parsed before inspection: {}",
+        statement.is_fully_parsed()
+    );
+
+    statement.ensure_fully_parsed()?;
+
+    println!(
+        "Fully parsed after inspection: {}",
+        statement.is_fully_parsed()
+    );
+
+    for (index, metadata) in statement.out_metadata().iter().enumerate() {
+        println!(
+            "Column {index}: name={}, type={}",
+            metadata.name(),
+            metadata.data_type()
+        );
     }
 
-    // get() reads a column value without removing it from the row
-    let title_from_get: String = row.get("TITLE")?;
-    println!("get() title: {title_from_get}");
+    let row = statement.query_row(&[])?;
+    let result: String = row.get(0)?;
 
-    // take() moves the column value out of the row
-    let title_from_take: String = row.take("TITLE")?;
-    println!("take() title: {title_from_take}");
-
-    // after take(), the column value in this row is null
-    let title_after_take: Option<String> = row.get("TITLE")?;
-    println!("title after take(): {title_after_take:?}");
+    println!("Connected user: {result}");
 
     Ok(())
 }

@@ -109,7 +109,7 @@ pub(crate) fn convert_logical_rowid(input: &[u8]) -> String {
         _ => {}
     };
     let mut output: Vec<u8> = vec![0u8; output_len];
-    output[0] = '*' as u8;
+    output[0] = b'*';
     let mut input_offset: usize = 0;
     let mut output_offset: usize = 1;
     while input_offset < input.len() {

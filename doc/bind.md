@@ -151,7 +151,38 @@ known as the bind direction.
 The examples shown above have all supplied data to the database and are
 classified as IN bind variables.
 
-## <a name="bindnull"></a> 5.4 Binding Null Values
+## <a name="outbindtypes"></a> 5.4 Binding OUT Values by Database Type
+
+For pure OUT bind variables, pass the Oracle Database type that should be used
+for the returned value.
+
+For example, an OUT `NUMBER` parameter can be bound with
+[oracledb::DB_TYPE_NUMBER](crate::DB_TYPE_NUMBER):
+
+```rust
+let mut result = connection.execute(
+    "begin myproc(:1, :2); end;",
+    &[&123, &oracledb::DB_TYPE_NUMBER],
+)?;
+
+let out_val: i32 = result.out_bind_data().get(0)?;
+```
+
+Named binds work the same way:
+
+```rust
+let mut result = connection.execute_named(
+    "begin myproc(:input_value, :output_value); end;",
+    &[
+        ("input_value", &123),
+        ("output_value", &oracledb::DB_TYPE_NUMBER),
+    ],
+)?;
+
+let out_val: i32 = result.out_bind_data().get(0)?;
+```
+
+## <a name="bindnull"></a> 5.5 Binding Null Values
 
 To insert a NULL into a character column you can use `Option<T>`. The type `T`
 is important because a NULL value has no type by itself. The type
@@ -174,18 +205,18 @@ connection.execute(
 )?;
 ```
 
-## <a name="bindrowid"></a> 5.5 Binding ROWID Values
+## <a name="bindrowid"></a> 5.6 Binding ROWID Values
 
 The pseudo-column ROWID uniquely identifies a row in a table. In rust-oracledb,
 ROWID values are represented as strings.
 
-## <a name="bindurowid"></a> 5.6 Binding UROWID Values
+## <a name="bindurowid"></a> 5.7 Binding UROWID Values
 
 Universal rowids (UROWID) are used to uniquely identify rows in index
 organized tables. In rust-oracledb, UROWID values are represented as
 strings.
 
-## <a name="dml-returning-bind"></a> 5.7 DML RETURNING Bind Variables
+## <a name="dml-returning-bind"></a> 5.8 DML RETURNING Bind Variables
 
 When a RETURNING clause is used with a DML statement like UPDATE, INSERT, or
 DELETE, the values are returned to the application through the use of OUT bind
@@ -226,7 +257,7 @@ returned string value. Since the WHERE clause matches one row, the vector
 contains one item. If multiple rows were updated, the vector would contain
 one item for each updated row.
 
-## <a name="multiplevalueswherein"></a> 5.8 Binding Multiple Values to a SQL WHERE IN Clause
+## <a name="multiplevalueswherein"></a> 5.9 Binding Multiple Values to a SQL WHERE IN Clause
 
 To bind multiple values in a SQL WHERE IN clause, create one bind placeholder
 for each value. A Rust `Vec<T>` cannot be bound directly to a single placeholder
@@ -360,7 +391,7 @@ In the above example, the employee_id value is bound to :1. The five last_names
 values are bound to :2 through :6. Use *Some(value)* for names you want to search
 for, and *None* for unused bind positions.
 
-### <a name="bindinlist"></a> 5.8.1 Binding a Large Number of Items in an IN List
+### <a name="bindinlist"></a> 5.9.1 Binding a Large Number of Items in an IN List
 
 The number of items in an IN list is limited to 65535 in Oracle Database
 version 26, and to 1000 in earlier versions. If you exceed the limit, the
@@ -393,7 +424,7 @@ The best way to do the `<something that returns a list of values>` depends on
 how the data is initially represented and the number of items. For example, you
 might look at using a global temporary table.
 
-## <a name="bindcoltblnames"></a> 5.9 Binding Column and Table Names
+## <a name="bindcoltblnames"></a> 5.10 Binding Column and Table Names
 
 Table names cannot be bound in SQL queries. You can concatenate text to
 build up a SQL statement, but ensure that you use an Allow List or other

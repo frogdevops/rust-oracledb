@@ -218,31 +218,36 @@ statement from the cache. This lets subsequent re-executions of the statement
 on that connection to succeed.
 
 When an application wants to reuse statement text together with statement
-options, create a statement with
-[Connection::statement()](crate::Connection::statement) and then call methods
-such as `execute()`, `execute_batch()`, or `query()` on the returned statement.
+options, call [Connection::statement()](crate::Connection::statement) to
+create a [StatementBuilder](crate::StatementBuilder). Configure the builder
+with methods such as
+[StatementBuilder::fetch_array_size()](crate::StatementBuilder::fetch_array_size)
+or [StatementBuilder::prefetch_rows()](crate::StatementBuilder::prefetch_rows),
+then call [StatementBuilder::build()](crate::StatementBuilder::build) to
+create the executable [Statement](crate::Statement).
+
 Statements are eligible for statement caching by default.
 
 To prevent a statement from being cached, call
-[Statement::exclude_from_cache()](crate::Statement::exclude_from_cache)
-on the statement before executing it. If the same SQL text is already present
-in the cache, using `exclude_from_cache()` removes it from the cache for that
-execution; otherwise, the statement is simply not cached. This feature can
-prevent a rarely executed statement from replacing a more frequently executed
-statement in a full cache. For example, if a statement will only be executed
-once, create it with [Connection::statement()](crate::Connection::statement)
-and call `exclude_from_cache()` before execution:
+[StatementBuilder::exclude_from_cache()](crate::StatementBuilder::exclude_from_cache)
+before building the statement. If the same SQL text is already present in the
+cache, this removes it from the cache for that execution. Otherwise, the
+statement is not cached. This can prevent a rarely executed statement from
+replacing a more frequently executed statement in a full cache. For example, if a
+statement will only be executed once:
 
 ```rust
 let row = connection
     .statement("select user from dual")?
     .exclude_from_cache()
+    .build()?
     .query_row(&[])?;
 ```
 
 Statements created with [Connection::statement()](crate::Connection::statement)
-are cached by default, unless `exclude_from_cache()` is called before
-execution.
+are cached by default, unless
+[StatementBuilder::exclude_from_cache()](crate::StatementBuilder::exclude_from_cache)
+is called before building the statement.
 
 [Automatic Workload Repository]: https://www.oracle.com/pls/topic/lookup?ctx=dblatest&id=GUID-56AEF38E-9400-427B-A818-EDEC145F7ACD
 [Configuring Session Data Unit]: https://www.oracle.com/pls/topic/lookup?ctx=dblatest&id=GUID-86D61D6F-AD26-421A-BABA-77949C8A2B04

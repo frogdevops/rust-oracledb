@@ -86,7 +86,10 @@ fn is_db_min_version(
 /// Fixture that returns a connection to use for performing tests.
 pub fn conn() -> oracledb::Connection {
     let config = oracledb::get_test_config().config.clone();
-    oracledb::connect(config).unwrap()
+    let conn = oracledb::connect(config).unwrap();
+    conn.execute("alter session set time_zone = 'UTC'", &[])
+        .unwrap();
+    conn
 }
 
 #[allow(dead_code)]

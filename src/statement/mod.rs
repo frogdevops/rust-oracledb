@@ -29,8 +29,8 @@
 //-----------------------------------------------------------------------------
 
 mod bind_info;
+mod builder;
 mod cache;
-mod holder;
 mod options;
 mod public;
 mod sql_parser;
@@ -140,8 +140,8 @@ impl CachedStatement {
     }
 
     /// Returns a copy of the names of the binds defined for the statement.
-    pub(crate) fn bind_names(&self) -> Vec<String> {
-        self.bind_names.clone()
+    pub(crate) fn bind_names(&self) -> &[String] {
+        &self.bind_names
     }
 
     /// Returns a boolean indicating if binds have changed since the last
@@ -312,6 +312,11 @@ impl CachedStatement {
         self.is_ddl
     }
 
+    /// Returns whether or not the statement is a DML statement.
+    pub(crate) fn is_dml(&self) -> bool {
+        self.is_dml
+    }
+
     /// Returns whether or not the statement is a DML returning statement.
     #[allow(dead_code)]
     pub(crate) fn is_dml_returning(&self) -> bool {
@@ -353,8 +358,8 @@ impl CachedStatement {
         &self.options
     }
 
-    /// Returns a reference to the vector of metadata for out variables.
-    pub(crate) fn out_metadata(&self) -> &Vec<Metadata> {
+    /// Returns a reference to the metadata for out variables.
+    pub(crate) fn out_metadata(&self) -> &[Metadata] {
         &self.out_metadata
     }
 
@@ -450,7 +455,7 @@ impl CachedStatement {
 }
 
 pub(crate) use bind_info::BindInfo;
+pub use builder::StatementBuilder;
 pub(crate) use cache::StatementCache;
-pub(crate) use holder::StatementHolder;
 pub(crate) use options::StatementOptions;
 pub use public::Statement;

@@ -29,6 +29,8 @@
 // publicly.
 //-----------------------------------------------------------------------------
 
+use super::CachedStatement;
+
 #[cfg(feature = "arrow")]
 use crate::arrow;
 use crate::bind_params::BindParameters;
@@ -36,75 +38,99 @@ use crate::client::ClientRef;
 use crate::cursor::Cursor;
 use crate::db_value::ToDbValue;
 use crate::error::Error;
-use crate::exec_result::{ExecBatchResult, ExecResult};
+use crate::exec_result::ExecBatchResult;
+use crate::exec_result::ExecResult;
+use crate::metadata::Metadata;
+use crate::response::Response;
+use crate::row::DbRow;
 use crate::row::Row;
-use crate::statement::StatementHolder;
-use crate::statement::StatementOptions;
 
 /// Represents SQL statements that can be executed with various options.
-pub struct Statement<'sql> {
+pub struct Statement {
     client_ref: ClientRef,
-    sql: &'sql str,
-    options: StatementOptions,
-    cache_statement: bool,
+    statement: CachedStatement,
 }
 
-impl<'sql> Statement<'sql> {
-    fn holder(&self) -> Result<StatementHolder, Error> {
+impl Statement {
+    /// Gets the response to a fetch.
+    pub(crate) fn fetch(
+        &self,
+        last_row: Option<DbRow>,
+    ) -> Result<Response, Error> {
         let mut client = self.client_ref.lock().unwrap();
-        let statement = client.get_statement(
-            self.sql,
-            self.cache_statement,
-            &self.options,
-        )?;
-        Ok(StatementHolder::new(self.client_ref.clone(), statement))
+        client.fetch(&self.statement, &self.client_ref, last_row)
     }
 
-    pub(crate) fn new(client_ref: &ClientRef, sql: &'sql str) -> Self {
+    /// Gets the response to the execution of a statement. At this point binds
+    /// have been checked and transformed (if needed) into the sequence
+    /// required by the server.
+    pub(crate) fn get_execute_response(
+        &mut self,
+        params: BindParameters,
+        parse_only: bool,
+    ) -> Result<Response, Error> {
+        let mut client = self.client_ref.lock().unwrap();
+        client.execute(
+            &mut self.statement,
+            &self.client_ref,
+            params,
+            parse_only,
+        )
+    }
+
+    /// Creates a new public facing statement from the internal cached
+    /// statement.
+    pub(crate) fn new(
+        client_ref: ClientRef,
+        statement: CachedStatement,
+    ) -> Self {
         Self {
-            client_ref: client_ref.clone(),
-            sql,
-            options: StatementOptions::new(),
-            cache_statement: true,
+            client_ref,
+            statement,
         }
     }
 
-    /// Returns a vector of the bind names used by the statement.
-    pub fn bind_names(&self) -> Result<Vec<String>, Error> {
-        let mut client = self.client_ref.lock().unwrap();
-        let statement = client.get_statement(
-            self.sql,
-            self.cache_statement,
-            &self.options,
-        )?;
-        let names = statement.bind_names();
-        client.return_statement(&statement);
-        Ok(names)
+    /// Returns the bind names used by the statement.
+    pub fn bind_names(&self) -> &[String] {
+        self.statement.bind_names()
+    }
+
+    /// Ensures that the statement is fully parsed by the database. If the
+    /// statement has not been fully parsed by the database, a round trip will
+    /// be performed to ask the database to parse the statement. Note that DDL
+    /// statements will also result in execution.
+    pub fn ensure_fully_parsed(&mut self) -> Result<(), Error> {
+        if !self.is_fully_parsed() {
+            self.get_execute_response(BindParameters::default(), true)?;
+        }
+        Ok(())
     }
 
     /// Executes the statement with the given parameters and returns an
     /// ExecResult structure. The statement that is executed may not be a
     /// query.
     pub fn execute(
-        &self,
+        &mut self,
         params: &[&dyn ToDbValue],
     ) -> Result<ExecResult, Error> {
-        let mut holder = self.holder()?;
-        let mut response = holder.execute(params)?;
-        Ok(ExecResult::new(holder.statement(), &mut response))
+        let binding = [params];
+        let params: BindParameters = binding.as_slice().into();
+        self.statement.check_binds(&params)?;
+        let mut response = self.get_execute_response(params, false)?;
+        Ok(ExecResult::new(&self.statement, &mut response))
     }
 
     /// Executes a SQL statement against the database multiple times in one
     /// round trip.
     pub fn execute_batch(
-        &self,
+        &mut self,
         params: BindParameters,
     ) -> Result<ExecBatchResult, Error> {
+        self.statement.check_binds(&params)?;
         let num_execs = params.num_rows();
-        let mut holder = self.holder()?;
-        let mut response = holder.execute_batch(params)?;
+        let mut response = self.get_execute_response(params, false)?;
         Ok(ExecBatchResult::new(
-            holder.statement(),
+            &self.statement,
             num_execs,
             &mut response,
         ))
@@ -114,47 +140,69 @@ impl<'sql> Statement<'sql> {
     /// ExecResult structure. The statement that is executed may not be a
     /// query.
     pub fn execute_named(
-        &self,
-        params: &[(&str, &dyn ToDbValue)],
+        &mut self,
+        named_params: &[(&str, &dyn ToDbValue)],
     ) -> Result<ExecResult, Error> {
-        let mut holder = self.holder()?;
-        let mut response = holder.execute_named(params)?;
-        Ok(ExecResult::new(holder.statement(), &mut response))
+        let checked_params = self.statement.check_named_binds(named_params)?;
+        let binding = [checked_params.as_slice()];
+        let params: BindParameters = binding.as_slice().into();
+        self.statement.check_binds(&params)?;
+        let mut response = self.get_execute_response(params, false)?;
+        Ok(ExecResult::new(&self.statement, &mut response))
     }
 
-    /// Specifies that this statement should not be cached.
-    pub fn exclude_from_cache(&mut self) -> &mut Self {
-        self.cache_statement = false;
-        self
+    /// Returns whether or not the statement is a DDL statement.
+    pub fn is_ddl(&self) -> bool {
+        self.statement.is_ddl()
     }
 
-    /// Specifies the number of rows that should be fetched at a time from the
+    /// Returns whether or not the statement is a DML statement.
+    pub fn is_dml(&self) -> bool {
+        self.statement.is_dml()
+    }
+
+    /// Returns whether or not the statement is a DML returning statement.
+    pub fn is_dml_returning(&self) -> bool {
+        self.statement.is_dml_returning()
+    }
+
+    /// Returns whether or not the statement has been fully parsed by the
     /// database.
-    pub fn fetch_array_size(&mut self, value: u32) -> &mut Self {
-        self.options.set_fetch_array_size(value);
-        self
+    pub fn is_fully_parsed(&self) -> bool {
+        self.statement.has_cursor()
     }
 
-    /// Specifies that LOB values should be fetched as LOB locators.
-    pub fn fetch_lobs(&mut self) -> &mut Self {
-        self.options.set_fetch_lobs();
-        self
+    /// Returns whether or not the statement is a PL/SQL statement.
+    pub fn is_plsql(&self) -> bool {
+        self.statement.is_plsql()
     }
 
-    /// Specifies the number of rows that should be fetched when the statement
-    /// is executed.
-    pub fn prefetch_rows(&mut self, value: u32) -> &mut Self {
-        self.options.set_prefetch_rows(value);
-        self
+    /// Returns whether or not the statement is a query.
+    pub fn is_query(&self) -> bool {
+        self.statement.is_query()
+    }
+
+    /// Returns the metadata of the data that is returned by the statement.
+    /// This includes OUT binds for PL/SQL statements, returned data for DML
+    /// RETURNING statements and column data for queries. Note that until the
+    /// statement is fully parsed, this information will not be known and an
+    /// empty slice will be returned.
+    pub fn out_metadata(&self) -> &[Metadata] {
+        self.statement.out_metadata()
     }
 
     /// Executes the statement with the given parameters and returns a Cursor
     /// which can be used to iterate over the rows returned by the query. The
     /// statement that is executed must be a query.
-    pub fn query(&self, params: &[&dyn ToDbValue]) -> Result<Cursor, Error> {
-        let mut holder = self.holder()?;
-        let response = holder.execute(params)?;
-        let mut cursor = Cursor::new(holder);
+    pub fn query(
+        mut self,
+        params: &[&dyn ToDbValue],
+    ) -> Result<Cursor, Error> {
+        let binding = [params];
+        let bind_params: BindParameters = binding.as_slice().into();
+        self.statement.check_binds(&bind_params)?;
+        let response = self.get_execute_response(bind_params, false)?;
+        let mut cursor = Cursor::new(self);
         cursor.set_from_initial_response(response);
         Ok(cursor)
     }
@@ -163,22 +211,32 @@ impl<'sql> Statement<'sql> {
     /// Performs a query against the database and returns an Arrow RecordBatch
     /// structure containing the data.
     pub fn query_arrow(
-        &self,
+        mut self,
         params: BindParameters,
     ) -> Result<arrow_array::RecordBatch, Error> {
-        arrow::query_single_batch(self.holder()?, params)
+        self.statement.check_binds(&params)?;
+        let mut client = self.client_ref.lock().unwrap();
+        arrow::query_single_batch(
+            &mut client,
+            &mut self.statement,
+            &self.client_ref,
+            params,
+        )
     }
 
     /// Executes the statement with the given parameters and returns a Cursor
     /// which can be used to iterate over the rows returned by the query. The
     /// statement that is executed must be a query.
     pub fn query_named(
-        &self,
-        params: &[(&str, &dyn ToDbValue)],
+        mut self,
+        named_params: &[(&str, &dyn ToDbValue)],
     ) -> Result<Cursor, Error> {
-        let mut holder = self.holder()?;
-        let response = holder.execute_named(params)?;
-        let mut cursor = Cursor::new(holder);
+        let checked_params = self.statement.check_named_binds(named_params)?;
+        let binding = [checked_params.as_slice()];
+        let params: BindParameters = binding.as_slice().into();
+        self.statement.check_binds(&params)?;
+        let response = self.get_execute_response(params, false)?;
+        let mut cursor = Cursor::new(self);
         cursor.set_from_initial_response(response);
         Ok(cursor)
     }
@@ -186,7 +244,7 @@ impl<'sql> Statement<'sql> {
     /// Executes the statement with the given parameters and returns the single
     /// row supplied by the database. If no rows are found, a NoDataFound error
     /// is returned. If multiple rows are found, an OutOfRange error is returned.
-    pub fn query_row(&self, params: &[&dyn ToDbValue]) -> Result<Row, Error> {
+    pub fn query_row(self, params: &[&dyn ToDbValue]) -> Result<Row, Error> {
         let mut cursor = self.query(params)?;
         match (cursor.next(), cursor.next()) {
             (None, _) => Err(Error::no_data_found()),
@@ -203,7 +261,7 @@ impl<'sql> Statement<'sql> {
     /// a NoDataFound error is returned. If multiple rows are found, an OutOfRange
     /// error is returned.
     pub fn query_row_named(
-        &self,
+        self,
         params: &[(&str, &dyn ToDbValue)],
     ) -> Result<Row, Error> {
         let mut cursor = self.query_named(params)?;
@@ -215,5 +273,17 @@ impl<'sql> Statement<'sql> {
             )),
             (Some(Err(e)), _) => Err(e),
         }
+    }
+
+    /// Returns the SQL associated with the statement.
+    pub fn sql(&self) -> &str {
+        self.statement.sql()
+    }
+}
+
+impl Drop for Statement {
+    fn drop(&mut self) {
+        let mut client = self.client_ref.lock().unwrap();
+        client.return_statement(&self.statement);
     }
 }

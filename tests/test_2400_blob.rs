@@ -146,6 +146,7 @@ fn test_2406(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_blob(:1) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[&payload])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = Vec::new();
@@ -163,6 +164,7 @@ fn test_2407(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2407")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
 
@@ -190,6 +192,7 @@ fn test_2408(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2408")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     lob.write_all(&payload)?;
@@ -197,6 +200,7 @@ fn test_2408(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2408")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = Vec::new();
@@ -215,6 +219,7 @@ fn test_2409(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2409")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     lob.trim(3)?;
@@ -222,6 +227,7 @@ fn test_2409(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2409")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = Vec::new();
@@ -237,6 +243,7 @@ fn test_2410(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_blob(:1) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[&payload])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = Vec::new();
@@ -261,6 +268,7 @@ fn test_2411(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2411")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     assert_eq!(lob.get_size()?, payload.len());
@@ -274,6 +282,7 @@ fn test_2412(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_blob(null) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let fetched: Option<oracledb::Lob> = row.take(0)?;
     assert!(fetched.is_none());
@@ -288,6 +297,7 @@ fn test_2413(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         let mut row = conn
             .statement("select to_blob(:1) from dual")?
             .fetch_lobs()
+            .build()?
             .query_row(&[&payload])?;
         let mut lob: oracledb::Lob = row.take(0)?;
         let mut read_back = Vec::new();
@@ -333,6 +343,7 @@ fn test_2416(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         let mut row = conn
             .statement("select to_blob(:1) from dual")?
             .fetch_lobs()
+            .build()?
             .query_row(&[&payload])?;
         row.take(0)?
     };
@@ -373,6 +384,7 @@ fn test_2419(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_blob(:1) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[&payload])?;
     let mut lob: oracledb::Lob = row.take(0)?;
 
@@ -422,6 +434,7 @@ fn test_2422(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2422 for update")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let chunk_size = lob.get_chunk_size()?;

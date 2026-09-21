@@ -220,7 +220,7 @@ impl Row {
     }
 
     /// Returns column information for the row.
-    pub fn columns(&self) -> &Vec<Metadata> {
+    pub fn columns(&self) -> &[Metadata] {
         &self.column_info
     }
 

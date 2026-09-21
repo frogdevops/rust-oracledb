@@ -39,6 +39,7 @@ fn test_2500(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_clob(:1) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[&text])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = String::new();
@@ -54,6 +55,7 @@ fn test_2501(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_nclob(:1) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[&text])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = String::new();
@@ -72,6 +74,7 @@ fn test_2502(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2502")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     lob.write_all(payload.as_bytes())?;
@@ -79,6 +82,7 @@ fn test_2502(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2502")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = String::new();
@@ -97,6 +101,7 @@ fn test_2503(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2503")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     lob.write_all(payload.as_bytes())?;
@@ -104,6 +109,7 @@ fn test_2503(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2503")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let mut read_back = String::new();
@@ -118,6 +124,7 @@ fn test_2504(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let row = conn
         .statement("select to_clob(null), to_nclob(null) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let clob: Option<oracledb::Lob> = row.get(0)?;
     let nclob: Option<oracledb::Lob> = row.get(1)?;
@@ -134,6 +141,7 @@ fn test_2505(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         let mut row = conn
             .statement("select to_clob(:1) from dual")?
             .fetch_lobs()
+            .build()?
             .query_row(&[&text])?;
         let mut lob: oracledb::Lob = row.take(0)?;
         let mut read_back = String::new();
@@ -188,6 +196,7 @@ fn test_2509(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2510")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     let error = lob
@@ -204,6 +213,7 @@ fn test_2510(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select to_clob(:1) from dual")?
         .fetch_lobs()
+        .build()?
         .query_row(&[&"é"])?;
     let mut lob: oracledb::Lob = row.take(0)?;
 
@@ -231,6 +241,7 @@ fn test_2511(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
     let mut row = conn
         .statement("select data from test_2511")?
         .fetch_lobs()
+        .build()?
         .query_row(&[])?;
     let mut lob: oracledb::Lob = row.take(0)?;
     lob.write_all(b"abcdef")?;

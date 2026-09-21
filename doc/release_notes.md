@@ -10,14 +10,22 @@
     [Metadata::vector_dimensions()](crate::Metadata::vector_dimensions()) and
     [Metadata::vector_dimensions()](crate::Metadata::vector_storage_format())
     and the enumeration [VectorStorageFormat](crate::VectorStorageFormat).
+1.  Added new struct [StatementBuilder](crate::StatementBuilder) to capture the
+    options used to build a statement and added a number of functions on the
+    struct [Statement](crate::Statement) to aid in introspection.
 1.  Added method [Row::columns()](crate::Row::columns()) to provide information
     about the columns found in that particular row.
 1.  Added struct [DbError](crate::DbError) containing information about the
     database error which is now returned instead of `String` for
     the [ErrorKind::DbError](crate::ErrorKind::DbError) enum variant.
 1.  Added support for fetching UROWID.
+1.  Added support for setting the session time zone from the environment
+    variable `ORA_SDTZ` or the client's local time zone (#9).
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
+1.  Fixed encoding of Oracle NUMBER data for values with an odd number of
+    leading zeroes after the decimal point
+    ([issue 21](https://github.com/oracle/rust-oracledb/issues/21)).
 1.  Ensure that connections returned from a pool always start with a call
     timeout of None.
 

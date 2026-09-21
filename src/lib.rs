@@ -87,6 +87,7 @@ pub use crate::pool::Pool;
 pub use crate::response::DbError;
 pub use crate::row::Row;
 pub use crate::statement::Statement;
+pub use crate::statement::StatementBuilder;
 pub use crate::vector::SparseVector;
 
 // public enums

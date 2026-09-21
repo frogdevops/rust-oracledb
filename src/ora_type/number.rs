@@ -312,12 +312,12 @@ impl ToBuf for OracleNumber {
         let mut num_digits: usize = self.num_digits.into();
         let mut prepend_zero = false;
         let mut decimal_point_index = self.decimal_point_index;
-        if decimal_point_index % 2 == 1 {
+        if decimal_point_index % 2 != 0 {
             prepend_zero = true;
             num_digits += 1;
             decimal_point_index += 1;
         }
-        if num_digits % 2 == 1 {
+        if num_digits % 2 != 0 {
             num_digits += 1;
         }
 
