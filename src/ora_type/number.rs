@@ -317,7 +317,7 @@ impl ToBuf for OracleNumber {
             num_digits += 1;
             decimal_point_index += 1;
         }
-        if num_digits % 2 != 0 {
+        if !num_digits.is_multiple_of(2) {
             num_digits += 1;
         }
 
