@@ -744,11 +744,9 @@ impl Client {
             let mut message =
                 ExecuteMessage::new(statement, params, parse_only);
             let mut response = self.process_message(&mut message)?;
-            if statement.is_query() {
-                response.finalize_rows(client_ref, statement.out_metadata());
-                if statement.requires_define() {
-                    statement.clear_requires_define();
-                }
+            response.finalize_rows(client_ref, statement.out_metadata());
+            if statement.requires_define() {
+                statement.clear_requires_define();
             }
             Ok(response)
         }

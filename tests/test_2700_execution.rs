@@ -83,7 +83,7 @@ fn test_2701(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
             &[("input_value", &value), ("out_value", &0)],
         )?;
         let out_bind_data = result.out_bind_data();
-        assert_eq!(out_bind_data.get::<i32>(0)?, value * 2);
+        assert_eq!(out_bind_data.get::<i32>("out_value")?, value * 2);
     }
     let mut result =
         conn.execute("begin :1 := :1 || :2; end;", &[&"value", &"-updated"])?;
@@ -738,5 +738,28 @@ fn test_2725(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
         statement.out_metadata()[0].db_type(),
         oracledb::DB_TYPE_VARCHAR
     );
+    Ok(())
+}
+
+#[rstest]
+/// Tests PL/SQL REF_CURSOR
+fn test_2726(conn: oracledb::Connection) -> Result<(), oracledb::Error> {
+    let mut result = conn.execute_named(
+        r#"
+        begin
+            open :cursor for
+                select level * 100
+                from dual
+                connect by level <= :num_iters;
+        end;
+        "#,
+        &[("num_iters", &5), ("cursor", &oracledb::DB_TYPE_CURSOR)],
+    )?;
+    let cursor: oracledb::Cursor = result.out_bind_data().take("cursor")?;
+    let fetched_values: Vec<u16> = cursor
+        .into_iter()
+        .map(|row| row?.get::<u16>(0))
+        .collect::<Result<Vec<u16>, _>>()?;
+    assert_eq!(fetched_values, vec![100, 200, 300, 400, 500]);
     Ok(())
 }

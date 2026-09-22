@@ -69,8 +69,11 @@ impl BindInfo {
         // set metadata for the bind variable if no match has taken place
         if !matches {
             *binds_changed = true;
-            let mut metadata =
-                Metadata::new_scalar(desired_type, desired_max_size);
+            let mut metadata = Metadata::new_scalar(
+                &self.name,
+                desired_type,
+                desired_max_size,
+            );
             if self.is_return_bind {
                 metadata.set_is_array(true);
             }

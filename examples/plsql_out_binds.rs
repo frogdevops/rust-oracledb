@@ -60,7 +60,7 @@ fn main() -> Result<(), oracledb::Error> {
         "begin rso_examples_proc(:p1, :p2); end;",
         &[("p1", &200), ("p2", &oracledb::DB_TYPE_NUMBER)],
     )?;
-    let p2: i32 = result.out_bind_data().get(0)?;
+    let p2: i32 = result.out_bind_data().get("p2")?;
     println!("{p2}");
 
     Ok(())

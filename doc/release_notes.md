@@ -33,6 +33,9 @@
 1.  Fixed bug processing duplicate column values when the number of prefetch
     rows is greater than two
     ([issue 27](https://github.com/oracle/rust-oracledb/issues/27)).
+1.  Ensure that PL/SQL out binds can be acquired from
+    [Row::get()](crate::Row::get()) and [Row::take()](crate::Row::take()) using
+    the bind variable name and not just the position in the list of out binds.
 1.  Ensure that connections returned from a pool always start with a call
     timeout of None.
 

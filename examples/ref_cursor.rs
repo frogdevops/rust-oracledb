@@ -50,11 +50,12 @@ fn main() -> Result<(), oracledb::Error> {
     )?;
 
     let mut result = connection.execute(
-        "begin rso_examples_ref_cursor(:1, :2); end;",
+        "begin rso_examples_ref_cursor(:num_val, :ref_cursor); end;",
         &[&3, &oracledb::DB_TYPE_CURSOR],
     )?;
 
-    let cursor: oracledb::Cursor = result.out_bind_data().take(0)?;
+    let cursor: oracledb::Cursor =
+        result.out_bind_data().take("ref_cursor")?;
     for row_result in cursor {
         let row = row_result?;
         let value: usize = row.get(0)?;

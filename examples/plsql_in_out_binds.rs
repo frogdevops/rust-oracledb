@@ -71,7 +71,7 @@ fn main() -> Result<(), oracledb::Error> {
             &[("p1", &p1), ("p2", &p2)],
         )?;
 
-        let outval: String = result.out_bind_data().get(0)?;
+        let outval: String = result.out_bind_data().get("p2")?;
 
         outvals.push(outval);
     }
