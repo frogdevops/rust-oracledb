@@ -584,6 +584,11 @@ impl Client {
         self.transport.close()
     }
 
+    /// Discards the transport without performing any database round trips.
+    pub(crate) fn discard_transport(&mut self) {
+        self.transport.discard();
+    }
+
     /// Returns the configuration associated with the client.
     pub(crate) fn config(&self) -> &Config {
         &self.config

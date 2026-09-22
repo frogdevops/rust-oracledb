@@ -61,14 +61,27 @@ impl PoolManager {
 
     /// Pings a connection and indicates whether or not it is safe to coninue
     /// using.
-    fn ping_connection(&self, conn_impl: ConnImpl) -> Result<ConnImpl, Error> {
-        let orig_call_timeout = conn_impl.get_call_timeout()?;
-        conn_impl.set_call_timeout(Some(self.config.ping_timeout()))?;
+    fn ping_connection(
+        &self,
+        conn_impl: ConnImpl,
+    ) -> Result<ConnImpl, (ConnImpl, Error)> {
+        let orig_call_timeout = match conn_impl.get_call_timeout() {
+            Ok(timeout) => timeout,
+            Err(err) => return Err((conn_impl, err)),
+        };
+        if let Err(err) =
+            conn_impl.set_call_timeout(Some(self.config.ping_timeout()))
+        {
+            return Err((conn_impl, err));
+        }
         let ping_result = conn_impl.ping();
         let restore_result = conn_impl.set_call_timeout(orig_call_timeout);
         match ping_result {
-            Ok(()) => restore_result.map(|_| conn_impl),
-            Err(err) => Err(err),
+            Ok(()) => match restore_result {
+                Ok(()) => Ok(conn_impl),
+                Err(err) => Err((conn_impl, err)),
+            },
+            Err(err) => Err((conn_impl, err)),
         }
     }
 
@@ -99,7 +112,13 @@ impl PoolManager {
                     let _ = conn_impl.close();
                 }
                 PoolManagerRequest::PingConnection(conn_impl) => {
-                    let result = self.ping_connection(conn_impl).ok();
+                    let result = match self.ping_connection(conn_impl) {
+                        Ok(conn_impl) => Some(conn_impl),
+                        Err((mut conn_impl, _err)) => {
+                            conn_impl.discard();
+                            None
+                        }
+                    };
                     self.contents_ref
                         .lock()
                         .unwrap()
