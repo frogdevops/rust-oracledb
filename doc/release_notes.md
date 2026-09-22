@@ -22,6 +22,9 @@
 1.  Added support for setting the session time zone from the environment
     variable `ORA_SDTZ` or the client's local time zone
     ([issue 9](https://github.com/oracle/rust-oracledb/issues/9)).
+1.  Added support for using the configured
+    [PoolConfig::ping_timeout()](crate::PoolConfig::ping_timeout()) value
+    ([issue 29](https://github.com/oracle/rust-oracledb/issues/29)).
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
 1.  Fixed encoding of Oracle NUMBER data for values with an odd number of

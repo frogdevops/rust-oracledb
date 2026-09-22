@@ -63,6 +63,7 @@ impl PoolManager {
     /// using.
     fn ping_connection(&self, conn_impl: ConnImpl) -> Result<ConnImpl, Error> {
         let orig_call_timeout = conn_impl.get_call_timeout()?;
+        conn_impl.set_call_timeout(Some(self.config.ping_timeout()))?;
         conn_impl.ping()?;
         conn_impl.set_call_timeout(orig_call_timeout)?;
         Ok(conn_impl)
