@@ -43,7 +43,8 @@ enum ExecutionOutput {
     PlSql(Vec<DbRow>),
     DmlReturning(Vec<DbRow>),
 }
-
+pub (crate) type ReturnedRows = Vec<Row>;
+pub(crate) type BatchReturnedRows = Vec<ReturnedRows>;
 impl ExecutionOutput {
     fn new(statement: &CachedStatement, resp: &mut Response) -> Self {
         let rows = resp.take_rows();
@@ -146,7 +147,7 @@ impl ExecResult {
     /// None means no container was supplied; Some(vec![]) means a supplied
     /// container contained zero rows. PL/SQL output causes an
     /// ExecutionOutputKindMismatch error; malformed containers return an error.
-    pub fn into_returned_data(self) -> Result<Option<Vec<Row>>, Error> {
+    pub fn into_returned_data(self) -> Result<Option<ReturnedRows>, Error> {
         self.output
             .into_rows(false, 1)?
             .map(|mut rows| {
@@ -211,7 +212,7 @@ impl ExecBatchResult {
     /// Consumes PL/SQL OUT rows in execution order without transposition.
     /// Returns None for absent output, or an error for a wrong output kind or
     /// an unexpected container count.
-    pub fn into_out_bind_data(self) -> Result<Option<Vec<Row>>, Error> {
+    pub fn into_out_bind_data(self) -> Result<Option<ReturnedRows>, Error> {
         Ok(self.output.into_rows(true, self.num_execs)?.map(|rows| {
             rows.into_iter()
                 .map(|row| Row::new(&self.column_info, row))
@@ -222,7 +223,7 @@ impl ExecBatchResult {
     /// Consumes DML RETURNING rows grouped in execution order.
     /// Empty groups are retained. Returns None for absent output, or an error
     /// for a wrong output kind, malformed data, or missing execution containers.
-    pub fn into_returned_data(self) -> Result<Option<Vec<Vec<Row>>>, Error> {
+    pub fn into_returned_data(self) -> Result<Option<BatchReturnedRows>, Error> {
         self.output
             .into_rows(false, self.num_execs)?
             .map(|rows| {
