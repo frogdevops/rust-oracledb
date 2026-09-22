@@ -55,6 +55,7 @@ pub(crate) struct ConnImpl {
     client_ref: ClientRef,
     db_info: DbInfo,
     returned_to_pool: Instant,
+    discarded: bool,
 }
 
 pub(crate) enum ConnImplStatus {
@@ -89,6 +90,12 @@ impl ConnImpl {
         self.client_ref.lock().unwrap().close()
     }
 
+    /// Discards the connection without performing any database round trips.
+    pub(crate) fn discard(&mut self) {
+        self.discarded = true;
+        self.client_ref.lock().unwrap().discard_transport();
+    }
+
     /// Establishes a connection to the database and returns it.
     pub(crate) fn connect(
         config: Config,
@@ -102,6 +109,7 @@ impl ConnImpl {
             client_ref,
             db_info,
             returned_to_pool: Instant::now(),
+            discarded: false,
         })
     }
 
@@ -378,6 +386,8 @@ impl ConnImpl {
 
 impl Drop for ConnImpl {
     fn drop(&mut self) {
-        let _ = self.close();
+        if !self.discarded {
+            let _ = self.close();
+        }
     }
 }

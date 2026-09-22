@@ -327,6 +327,11 @@ impl Transport {
             .and_then(|mut t| t.shutdown())
     }
 
+    /// Detaches the transport without performing protocol shutdown.
+    pub(crate) fn discard(&mut self) {
+        self.low_level_transport.take();
+    }
+
     /// Establishes a TCP connection to the database.
     pub(crate) fn connect(
         &mut self,
