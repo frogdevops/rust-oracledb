@@ -67,7 +67,7 @@ impl DbRow {
     fn get(&self, index: usize) -> Result<&Option<DbValue>, Error> {
         self.column_values
             .get(index)
-            .ok_or(Error::invalid_column_index(index))
+            .ok_or_else(|| Error::invalid_column_index(index))
     }
 
     /// Returns the element at the given index, or an error. The value is
@@ -76,7 +76,7 @@ impl DbRow {
         let column_value = self
             .column_values
             .get_mut(index)
-            .ok_or(Error::invalid_column_index(index))?;
+            .ok_or_else(|| Error::invalid_column_index(index))?;
         Ok(column_value.take())
     }
 
