@@ -58,14 +58,19 @@ pub struct Metadata {
 
 impl Metadata {
     /// Returns a new structure with the given values.
-    fn new(db_type: &'static DbType, max_size: usize, is_array: bool) -> Self {
+    fn new(
+        name: &str,
+        db_type: &'static DbType,
+        max_size: usize,
+        is_array: bool,
+    ) -> Self {
         let actual_max_size: u32 = if max_size == 0 {
             db_type.default_size
         } else {
             max_size.try_into().unwrap()
         };
         Self {
-            name: String::new(),
+            name: name.into(),
             db_type,
             nullable: false,
             null_by_describe: false,
@@ -169,22 +174,18 @@ impl Metadata {
         };
         Ok(metadata)
     }
-	/// Sets the name of the metadata
-	pub(crate) fn set_name(&mut self, name: String) {
-		self.name = name;
-	}
-
-    /// Returns true if the column is null by describe.
+	/// Returns true if the column is null by describe.
     pub(crate) fn is_null_by_describe(&self) -> bool {
         self.null_by_describe
     }
 
     /// Returns a new scalar with the given type and maximum size.
     pub(crate) fn new_scalar(
+        name: &str,
         db_type: &'static DbType,
         max_size: usize,
     ) -> Metadata {
-        Metadata::new(db_type, max_size, false)
+        Metadata::new(name, db_type, max_size, false)
     }
 
     /// Returns a boolean indicating if the metadata requires a define. This is

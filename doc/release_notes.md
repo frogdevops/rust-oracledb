@@ -58,7 +58,13 @@ match result.into_returned_data()? {
     the [ErrorKind::DbError](crate::ErrorKind::DbError) enum variant.
 1.  Added support for fetching UROWID.
 1.  Added support for setting the session time zone from the environment
-    variable `ORA_SDTZ` or the client's local time zone (#9).
+    variable `ORA_SDTZ` or the client's local time zone
+    ([issue 9](https://github.com/oracle/rust-oracledb/issues/9)).
+1.  Avoid building errors unless they are needed
+    ([issue 28](https://github.com/oracle/rust-oracledb/issues/28)).
+1.  Added support for using the configured
+    [PoolConfig::ping_timeout()](crate::PoolConfig::ping_timeout()) value
+    ([issue 29](https://github.com/oracle/rust-oracledb/issues/29)).
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
 1.  Fixed encoding of Oracle NUMBER data for values with an odd number of
@@ -67,6 +73,9 @@ match result.into_returned_data()? {
 1.  Fixed bug processing duplicate column values when the number of prefetch
     rows is greater than two
     ([issue 27](https://github.com/oracle/rust-oracledb/issues/27)).
+1.  Ensure that PL/SQL out binds can be acquired from
+    [Row::get()](crate::Row::get()) and [Row::take()](crate::Row::take()) using
+    the bind variable name and not just the position in the list of out binds.
 1.  Ensure that connections returned from a pool always start with a call
     timeout of None.
 
