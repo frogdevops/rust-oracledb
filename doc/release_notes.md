@@ -20,7 +20,8 @@
     the [ErrorKind::DbError](crate::ErrorKind::DbError) enum variant.
 1.  Added support for fetching UROWID.
 1.  Added support for setting the session time zone from the environment
-    variable `ORA_SDTZ` or the client's local time zone (#9).
+    variable `ORA_SDTZ` or the client's local time zone
+    ([issue 9](https://github.com/oracle/rust-oracledb/issues/9)).
 1.  Eliminated hang when an error occurs during a DML returning statemnt
     ([issue 16](https://github.com/oracle/rust-oracledb/issues/16)).
 1.  Fixed encoding of Oracle NUMBER data for values with an odd number of
