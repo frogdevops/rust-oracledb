@@ -196,6 +196,7 @@ impl Client {
                 response.add_packets(self.receive_packets()?);
                 continue;
             }
+            self.process_call_status(response.call_status());
             return Err(e);
         }
         if response.get_flush_out_binds() {
@@ -491,10 +492,18 @@ impl Client {
     /// know when the client is beginning and ending a request. The database
     /// uses this information to optimise its resources.
     fn write_piggyback_session_state(&mut self, buf: &mut WriteBuffer) {
-        let state = self.pending_session_state
-            | constants::TTC_SESSION_STATE_EXPLICIT_BOUNDARY;
-        buf.write_piggyback_header(self, constants::TTC_RPC_SESSION_STATE);
-        buf.write_ub8(state as u64);
+        if self.pending_session_state & constants::TTC_SESSION_STATE_REQUEST_END != 0 {
+            let state = constants::TTC_SESSION_STATE_REQUEST_END
+                | constants::TTC_SESSION_STATE_EXPLICIT_BOUNDARY;
+            buf.write_piggyback_header(self, constants::TTC_RPC_SESSION_STATE);
+            buf.write_ub8(state as u64);
+        }
+        if self.pending_session_state & constants::TTC_SESSION_STATE_REQUEST_BEGIN != 0 {
+            let state = constants::TTC_SESSION_STATE_REQUEST_BEGIN
+                | constants::TTC_SESSION_STATE_EXPLICIT_BOUNDARY;
+            buf.write_piggyback_header(self, constants::TTC_RPC_SESSION_STATE);
+            buf.write_ub8(state as u64);
+        }
         self.pending_session_state = 0;
     }
 
@@ -714,6 +723,7 @@ impl Client {
         self.security_context = None;
         self.last_warning = None;
         self.transport.set_read_timeout(None)?;
+        let was_in_request = self.in_request;
         if self.in_request {
             self.in_request = false;
             if self.pending_session_state
@@ -725,8 +735,8 @@ impl Client {
                     constants::TTC_SESSION_STATE_REQUEST_END;
             }
         }
-        if self.transaction_in_progress {
-            self.process_message(&mut RollbackMessage::new())?;
+        if self.transaction_in_progress || (was_in_request && self.pending_session_state != 0) {
+            let _ = self.process_message(&mut RollbackMessage::new());
             self.transaction_in_progress = false;
             self.pending_session_state = 0;
         }
