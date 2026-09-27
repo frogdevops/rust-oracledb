@@ -1,6 +1,6 @@
 # <a name="releasenotes"></a> rust-oracledb Release Notes
 
-## rust-oracledb 26.0.0-beta.4 (TBD)
+## rust-oracledb 26.0.0-beta.4 (September 23, 2026)
 
 ### Fork migration: consuming execution output
 
@@ -60,6 +60,8 @@ match result.into_returned_data()? {
 1.  Added support for setting the session time zone from the environment
     variable `ORA_SDTZ` or the client's local time zone
     ([issue 9](https://github.com/oracle/rust-oracledb/issues/9)).
+1.  Avoid panicing when a lock is poisoned
+    ([issue 22](https://github.com/oracle/rust-oracledb/issues/22)).
 1.  Avoid building errors unless they are needed
     ([issue 28](https://github.com/oracle/rust-oracledb/issues/28)).
 1.  Added support for using the configured
@@ -78,6 +80,8 @@ match result.into_returned_data()? {
     the bind variable name and not just the position in the list of out binds.
 1.  Ensure that connections returned from a pool always start with a call
     timeout of None.
+1.  Corrected calculation of national character set ID used when creating
+    temporary LOBs.
 
 
 ## rust-oracledb 26.0.0-beta.3 (September 8, 2026)

@@ -71,6 +71,7 @@ pub enum ErrorKind {
     InvalidServiceName(String, String, String, u16),
     InvalidSid(String, String, String, u16),
     ListenerRefusedConnection(String, String, u16, usize),
+    LockPoisoned,
     MissingBindValue(String),
     NameHasEmbeddedQuotes,
     NoConfigDir,
@@ -161,6 +162,12 @@ impl From<std::string::FromUtf8Error> for Error {
 impl From<std::string::FromUtf16Error> for Error {
     fn from(e: std::string::FromUtf16Error) -> Error {
         Self::new(ErrorKind::InvalidEncodedString, Some(Box::new(e)))
+    }
+}
+
+impl<T> From<std::sync::PoisonError<T>> for Error {
+    fn from(_: std::sync::PoisonError<T>) -> Self {
+        Self::new(ErrorKind::LockPoisoned, None)
     }
 }
 
@@ -302,6 +309,9 @@ impl fmt::Display for Error {
                      connection. (Similar to ORA-{error_num}) \
                      (CONNECTION_ID={connection_id})"
             )?,
+            ErrorKind::LockPoisoned => {
+                fmt.write_str("lock poisoned")?
+            }
             ErrorKind::OutOfData => fmt.write_str("out of data")?,
             ErrorKind::OutOfRange(m) => write!(fmt, "{}", m)?,
             ErrorKind::ParseError(s, p) => {
